@@ -1,0 +1,83 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function pollData(pollId) {
+      return get(/databases/$(database)/documents/polls/$(pollId)).data;
+    }
+
+    function isPollCreator(pollId) {
+      return isSignedIn() && pollData(pollId).createdBy == request.auth.uid;
+    }
+
+    // polls/{pollId}
+    //   question: string
+    //   options: [{ id: string, text: string }, ...]   (no voteCount - see results/ below)
+    //   optionIds: [string, ...]                       (mirrors options[].id, used for validation)
+    //   isActive: boolean
+    //   createdAt: timestamp
+    //   createdBy: string (uid of the creator/admin for this poll)
+    match /polls/{pollId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.question is string
+        && request.resource.data.question.size() > 0
+        && request.resource.data.question.size() <= 200
+        && request.resource.data.isActive is bool
+        && request.resource.data.options is list
+        && request.resource.data.options.size() >= 2
+        && request.resource.data.options.size() <= 10
+        && request.resource.data.optionIds is list
+        && request.resource.data.optionIds.size() == request.resource.data.options.size()
+        && request.resource.data.keys().hasOnly(
+             ['question', 'options', 'optionIds', 'isActive', 'createdAt', 'createdBy']);
+
+      // Only the creator may modify their poll, and only to flip isActive
+      // (e.g. closing voting). question/options/createdBy/createdAt are immutable.
+      allow update: if isSignedIn()
+        && resource.data.createdBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive'])
+        && request.resource.data.isActive is bool;
+
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+
+      // polls/{pollId}/votes/{voterUid}
+      //   optionId: string
+      //   votedAt: timestamp
+      // Document id == voter's own uid, which prevents double voting.
+      match /votes/{voterUid} {
+        // The creator can read all votes; a voter may only read their own
+        // (so the client can check "have I already voted").
+        allow read: if isPollCreator(pollId)
+          || (isSignedIn() && request.auth.uid == voterUid);
+
+        allow create: if isSignedIn()
+          && request.auth.uid == voterUid
+          && pollData(pollId).isActive == true
+          && request.resource.data.optionId in pollData(pollId).optionIds
+          && request.resource.data.votedAt == request.time
+          && request.resource.data.keys().hasOnly(['optionId', 'votedAt']);
+
+        // Votes are immutable once cast.
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      // Vote tallies are derived by the creator directly from the votes
+      // subcollection above (which they can already read in full) rather
+      // than stored in a separately-writable counter. A counter a voter can
+      // increment can't be bound to "and I also cast a real vote" by rules
+      // alone (rules can't see a sibling document's write within the same
+      // request), so a client could otherwise call that increment directly,
+      // repeatedly, without ever creating a votes/{uid} doc.
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "voting-app",
+  "private": true,
+  "scripts": {
+    "test:e2e": "firebase emulators:exec --only auth,firestore,hosting \"node tests/e2e.js\"",
+    "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.js\"",
+    "test": "npm run test:rules && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.18.0",
+    "playwright": "^1.63.0"
+  }
+}

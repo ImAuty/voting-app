@@ -158,13 +158,15 @@ async function main() {
   }
 
   console.log("== Step 1h: the now-published poll shows up in the public root list ==");
-  // Checked first via a plain single-document read (the voter view) rather
-  // than jumping straight to the root list's where()+orderBy() query - the
-  // emulator was observed to occasionally take several extra seconds to
-  // make a very recent write visible to that composite query specifically,
-  // for a document with this poll's write history (draft save, edit,
-  // publish - three rapid writes to one doc), well past the point where a
-  // plain get-this-one-document read already reflects it.
+  // Checked first via a plain single-document read (the voter view), which
+  // is also a real assertion worth having on its own. A version of this
+  // test that went straight for the root list's where()+orderBy() query
+  // here was occasionally slow (tens of seconds) - a direct, controlled
+  // comparison against the emulator (matching this exact write history:
+  // draft save, edit, publish) found no inherent gap between a single-doc
+  // listener and this query, so the cause is unconfirmed; this ordering is
+  // a reasonable-cost mitigation rather than a targeted fix for a
+  // root-caused issue.
   const strangerViewCtx = await browser.newContext();
   const strangerView = await strangerViewCtx.newPage();
   await strangerView.goto(`${BASE}/poll/${draftPollId}`);

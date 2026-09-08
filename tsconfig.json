@@ -1,0 +1,22 @@
+{
+  // Type-checks public/*.js in place via JSDoc comments - no build step, no
+  // emitted output. strictNullChecks is off because the code's style leans
+  // on "this element was just rendered above, so it exists" rather than
+  // null-checking every DOM lookup; turning it on would mean casting or
+  // guarding dozens of getElementById/querySelector calls for no real bug
+  // coverage. Real shape/argument mismatches (e.g. against the Poll type)
+  // are still caught.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["dom", "es2022"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strictNullChecks": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["public/**/*.js", "types/**/*.d.ts"]
+}

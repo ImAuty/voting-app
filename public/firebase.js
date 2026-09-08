@@ -10,10 +10,13 @@ import {
   connectFirestoreEmulator,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
+/** @import { User } from "firebase/auth" */
+
 const isLocalhost = ["localhost", "127.0.0.1"].includes(location.hostname);
 
 // Firebase Hosting serves this reserved URL with the project's real web app
 // config, so we never have to hardcode it here.
+/** @type {import("firebase/app").FirebaseOptions} */
 const firebaseConfig = await fetch("/__/firebase/init.json").then((res) => res.json());
 
 export const app = initializeApp(firebaseConfig);
@@ -27,6 +30,7 @@ if (isLocalhost) {
 
 // Every visitor (voter or poll creator) is signed in anonymously; their uid
 // is what security rules use to tell voters and the poll's creator apart.
+/** @returns {Promise<User>} */
 export function waitForUser() {
   return new Promise((resolve, reject) => {
     const unsubscribe = onAuthStateChanged(

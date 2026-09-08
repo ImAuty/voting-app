@@ -14,13 +14,62 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
-const appEl = document.getElementById("app");
+/**
+ * @typedef {Object} PollOption
+ * @property {string} id
+ * @property {string} text
+ * @property {string} [description]
+ * @property {string} [imageUrl]
+ */
 
+/**
+ * @typedef {Object} Poll
+ * @property {string} id
+ * @property {string} question
+ * @property {PollOption[]} options
+ * @property {string[]} optionIds
+ * @property {boolean} isActive
+ * @property {import("firebase/firestore").Timestamp} createdAt
+ * @property {string} createdBy
+ */
+
+/**
+ * @typedef {{ question: string, options: PollOption[] }} CopySource
+ */
+
+/**
+ * @typedef {{ type: "root" }} RootRoute
+ * @typedef {{ type: "create" }} CreateRoute
+ * @typedef {{ type: "history" }} HistoryRoute
+ * @typedef {{ type: "poll", pollId: string, admin: boolean }} PollRoute
+ * @typedef {{ type: "notfound" }} NotFoundRoute
+ * @typedef {RootRoute | CreateRoute | HistoryRoute | PollRoute | NotFoundRoute} Route
+ */
+
+/** @import { DocumentData, Unsubscribe } from "firebase/firestore" */
+
+/**
+ * @param {string} id
+ * @param {DocumentData} data
+ * @returns {Poll}
+ */
+function toPoll(id, data) {
+  return /** @type {Poll} */ ({ id, ...data });
+}
+
+const appEl = /** @type {HTMLElement} */ (document.getElementById("app"));
+
+/** @type {string | null} */
 let uid = null;
+/** @type {Poll | null} */
 let myPoll = null; // most recent poll I created, or null - only consulted on "/"
+/** @type {Poll | null} */
 let activePoll = null; // the poll currently open for voting network-wide, or null - only consulted on "/"
+/** @type {CopySource | null} */
 let copySource = null; // { question, options } staged by "copy and create new" in the history list
+/** @type {Route | null} */
 let route = null;
+/** @type {Unsubscribe[]} */
 let routeUnsubs = []; // every Firestore listener the current route depends on
 
 // ---- Router ----
@@ -35,6 +84,7 @@ let routeUnsubs = []; // every Firestore listener the current route depends on
 // the URL rather than "whichever poll happens to be active" - visiting
 // "/poll/xyz" always shows poll xyz, whether or not it's still open.
 
+/** @returns {Route} */
 function parseRoute() {
   const path = location.pathname.replace(/\/+$/, "") || "/";
   if (path === "/") return { type: "root" };
@@ -47,6 +97,10 @@ function parseRoute() {
   return { type: "notfound" };
 }
 
+/**
+ * @param {string} path
+ * @param {{ replace?: boolean }} [options]
+ */
 function navigate(path, { replace = false } = {}) {
   if (replace) history.replaceState({}, "", path);
   else history.pushState({}, "", path);
@@ -63,16 +117,18 @@ window.addEventListener("popstate", () => {
 // per-element listeners would need constant rewiring, and option thumbnails
 // (voter list + results) need the same treatment for the lightbox.
 appEl.addEventListener("click", (e) => {
-  const link = e.target.closest("a[data-link]");
+  const target = /** @type {HTMLElement} */ (e.target);
+  const link = target.closest("a[data-link]");
   if (link) {
     e.preventDefault();
-    navigate(link.getAttribute("href"));
-  } else if (e.target && e.target.classList.contains("option-thumb")) {
+    navigate(/** @type {string} */ (link.getAttribute("href")));
+  } else if (target.classList.contains("option-thumb")) {
     e.preventDefault();
-    showLightbox(e.target.getAttribute("src"));
+    showLightbox(/** @type {string} */ (target.getAttribute("src")));
   }
 });
 
+/** @param {string} src */
 function showLightbox(src) {
   const overlay = document.createElement("div");
   overlay.className = "lightbox-overlay";
@@ -94,7 +150,7 @@ async function main() {
   onSnapshot(
     query(collection(db, "polls"), where("isActive", "==", true), limit(1)),
     (snap) => {
-      activePoll = snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
+      activePoll = snap.empty ? null : toPoll(snap.docs[0].id, snap.docs[0].data());
       if (route.type === "root") renderRoute();
     },
     logBackgroundError,
@@ -108,7 +164,7 @@ async function main() {
       limit(1),
     ),
     (snap) => {
-      myPoll = snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
+      myPoll = snap.empty ? null : toPoll(snap.docs[0].id, snap.docs[0].data());
       if (route.type === "root") renderRoute();
     },
     logBackgroundError,
@@ -117,6 +173,7 @@ async function main() {
   renderRoute();
 }
 
+/** @param {unknown} err */
 function logBackgroundError(err) {
   console.error("background listener error:", err);
 }
@@ -155,9 +212,14 @@ function renderRoot() {
   }
 }
 
+/**
+ * @param {string} pollId
+ * @param {boolean} admin
+ */
 function renderPollRoute(pollId, admin) {
   appEl.innerHTML = `<p class="muted">読み込み中…</p>`;
 
+  /** @type {Unsubscribe | null} */
   let innerUnsub = null;
   function clearInner() {
     if (innerUnsub) {
@@ -174,7 +236,7 @@ function renderPollRoute(pollId, admin) {
         renderNotFound();
         return;
       }
-      const poll = { id: snap.id, ...snap.data() };
+      const poll = toPoll(snap.id, snap.data());
       if (admin && poll.createdBy === uid) {
         innerUnsub = renderAdmin(poll);
       } else {
@@ -203,6 +265,7 @@ function renderCreateForm() {
   const prefill = copySource;
   copySource = null;
 
+  /** @type {{ text: string, description: string, imageUrl: string }[]} */
   const optionValues = prefill
     ? prefill.options.map((o) => ({
         text: o.text || "",
@@ -230,8 +293,8 @@ function renderCreateForm() {
     </div>
   `;
 
-  const optionsEl = document.getElementById("options");
-  const errorEl = document.getElementById("form-error");
+  const optionsEl = /** @type {HTMLElement} */ (document.getElementById("options"));
+  const errorEl = /** @type {HTMLElement} */ (document.getElementById("form-error"));
 
   function drawOptions() {
     optionsEl.innerHTML = optionValues
@@ -253,15 +316,16 @@ function renderCreateForm() {
 
     optionsEl.querySelectorAll("input[data-field]").forEach((input) => {
       input.addEventListener("input", (e) => {
-        const i = Number(e.target.dataset.index);
-        const field = e.target.dataset.field;
-        optionValues[i][field] = e.target.value;
+        const target = /** @type {HTMLInputElement} */ (e.target);
+        const i = Number(target.dataset.index);
+        const field = /** @type {"text" | "description" | "imageUrl"} */ (target.dataset.field);
+        optionValues[i][field] = target.value;
         if (field === "imageUrl") drawOptions();
       });
     });
     optionsEl.querySelectorAll("[data-remove]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        optionValues.splice(Number(btn.dataset.remove), 1);
+        optionValues.splice(Number(/** @type {HTMLElement} */ (btn).dataset.remove), 1);
         drawOptions();
       });
     });
@@ -275,9 +339,9 @@ function renderCreateForm() {
   });
 
   document.getElementById("create-poll").addEventListener("click", async (e) => {
-    const button = e.target;
+    const button = /** @type {HTMLButtonElement} */ (e.target);
     errorEl.textContent = "";
-    const question = document.getElementById("question").value.trim();
+    const question = /** @type {HTMLInputElement} */ (document.getElementById("question")).value.trim();
     const options = optionValues
       .map((o) => ({
         text: o.text.trim(),
@@ -305,15 +369,21 @@ function renderCreateForm() {
       await createPoll(question, options);
     } catch (err) {
       console.error(err);
-      errorEl.textContent = "作成に失敗しました: " + err.message;
+      errorEl.textContent = "作成に失敗しました: " + errorMessage(err);
       button.disabled = false;
     }
   });
 }
 
+/**
+ * @param {string} question
+ * @param {{ text: string, description: string, imageUrl: string }[]} optionInputs
+ */
 async function createPoll(question, optionInputs) {
   const optionIds = optionInputs.map((_, i) => String(i));
+  /** @type {PollOption[]} */
   const options = optionInputs.map((o, i) => {
+    /** @type {PollOption} */
     const option = { id: optionIds[i], text: o.text };
     if (o.description) option.description = o.description;
     if (o.imageUrl) option.imageUrl = o.imageUrl;
@@ -334,6 +404,10 @@ async function createPoll(question, optionInputs) {
 
 // ---- Vote ----
 
+/**
+ * @param {Poll} poll
+ * @returns {Unsubscribe}
+ */
 function renderVoter(poll) {
   appEl.innerHTML = `
     <h1>投票システム</h1>
@@ -352,11 +426,12 @@ function renderVoter(poll) {
     </div>
   `;
 
-  const optionsEl = document.getElementById("options");
-  const voteBtn = document.getElementById("vote-btn");
-  const errorEl = document.getElementById("vote-error");
-  const statusEl = document.getElementById("status");
+  const optionsEl = /** @type {HTMLElement} */ (document.getElementById("options"));
+  const voteBtn = /** @type {HTMLButtonElement} */ (document.getElementById("vote-btn"));
+  const errorEl = /** @type {HTMLElement} */ (document.getElementById("vote-error"));
+  const statusEl = /** @type {HTMLElement} */ (document.getElementById("status"));
 
+  /** @type {string | null} */
   let selected = null;
 
   if (poll.isActive) {
@@ -364,7 +439,7 @@ function renderVoter(poll) {
 
     optionsEl.querySelectorAll('input[name="option"]').forEach((input) => {
       input.addEventListener("change", (e) => {
-        selected = e.target.value;
+        selected = /** @type {HTMLInputElement} */ (e.target).value;
         voteBtn.disabled = false;
       });
     });
@@ -373,7 +448,9 @@ function renderVoter(poll) {
   }
 
   // Watching my own vote doc both shows "already voted" and confirms success.
-  const unsub = onSnapshot(doc(db, "polls", poll.id, "votes", uid), (snap) => {
+  // uid is guaranteed set by the time any route renders - main() awaits
+  // waitForUser() before the router ever runs.
+  const unsub = onSnapshot(doc(db, "polls", poll.id, "votes", /** @type {string} */ (uid)), (snap) => {
     if (snap.exists()) {
       const votedOption = poll.options.find((o) => o.id === snap.data().optionId);
       if (optionsEl) optionsEl.innerHTML = "";
@@ -393,7 +470,7 @@ function renderVoter(poll) {
         await castVote(poll.id, selected);
       } catch (err) {
         console.error(err);
-        errorEl.textContent = "投票に失敗しました: " + err.message;
+        errorEl.textContent = "投票に失敗しました: " + errorMessage(err);
         voteBtn.disabled = false;
       }
     });
@@ -402,6 +479,7 @@ function renderVoter(poll) {
   return unsub;
 }
 
+/** @param {PollOption} opt */
 function optionRowHtml(opt) {
   return `
     <label class="option-row">
@@ -415,8 +493,12 @@ function optionRowHtml(opt) {
   `;
 }
 
+/**
+ * @param {string} pollId
+ * @param {string} optionId
+ */
 async function castVote(pollId, optionId) {
-  const voteRef = doc(db, "polls", pollId, "votes", uid);
+  const voteRef = doc(db, "polls", pollId, "votes", /** @type {string} */ (uid));
 
   // A friendly pre-check (reading my own vote doc is always allowed); the
   // security rules are the real enforcement - votes/{uid} can only ever be
@@ -431,6 +513,10 @@ async function castVote(pollId, optionId) {
 
 // ---- Admin (poll creator) ----
 
+/**
+ * @param {Poll} poll
+ * @returns {Unsubscribe}
+ */
 function renderAdmin(poll) {
   appEl.innerHTML = `
     <h1>投票システム</h1>
@@ -448,13 +534,14 @@ function renderAdmin(poll) {
     </div>
   `;
 
-  const resultsEl = document.getElementById("results");
-  const errorEl = document.getElementById("admin-error");
+  const resultsEl = /** @type {HTMLElement} */ (document.getElementById("results"));
+  const errorEl = /** @type {HTMLElement} */ (document.getElementById("admin-error"));
 
   // Tallies are derived live from the votes subcollection (readable only by
   // the creator) rather than a separately-writable counter - there's then
   // nothing a voter could write directly to inflate a count.
   const unsub = onSnapshot(collection(db, "polls", poll.id, "votes"), (snap) => {
+    /** @type {Record<string, number>} */
     const counts = {};
     snap.forEach((d) => {
       const optionId = d.data().optionId;
@@ -463,7 +550,7 @@ function renderAdmin(poll) {
     renderResultsInto(resultsEl, poll, counts);
   });
 
-  const closeBtn = document.getElementById("close-poll");
+  const closeBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById("close-poll"));
   if (closeBtn) {
     closeBtn.addEventListener("click", async () => {
       closeBtn.disabled = true;
@@ -471,7 +558,7 @@ function renderAdmin(poll) {
         await updateDoc(doc(db, "polls", poll.id), { isActive: false });
       } catch (err) {
         console.error(err);
-        errorEl.textContent = "締め切りに失敗しました: " + err.message;
+        errorEl.textContent = "締め切りに失敗しました: " + errorMessage(err);
         closeBtn.disabled = false;
       }
     });
@@ -480,6 +567,11 @@ function renderAdmin(poll) {
   return unsub;
 }
 
+/**
+ * @param {HTMLElement} resultsEl
+ * @param {Poll} poll
+ * @param {Record<string, number>} counts
+ */
 function renderResultsInto(resultsEl, poll, counts) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
@@ -515,7 +607,7 @@ function renderHistory() {
     </div>
   `;
 
-  const listEl = document.getElementById("history-list");
+  const listEl = /** @type {HTMLElement} */ (document.getElementById("history-list"));
 
   const unsub = onSnapshot(
     query(
@@ -530,7 +622,7 @@ function renderHistory() {
         return;
       }
 
-      const polls = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const polls = snap.docs.map((d) => toPoll(d.id, d.data()));
 
       listEl.innerHTML = polls
         .map(
@@ -548,7 +640,7 @@ function renderHistory() {
 
       listEl.querySelectorAll(".copy-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
-          const poll = polls[Number(btn.dataset.copyIndex)];
+          const poll = polls[Number(/** @type {HTMLElement} */ (btn).dataset.copyIndex)];
           copySource = { question: poll.question, options: poll.options };
           navigate("/new");
         });
@@ -572,25 +664,34 @@ function renderNotFound() {
 
 // ---- Utilities ----
 
+/** @param {string} value */
 function isHttpUrl(value) {
   return /^https?:\/\//i.test(value);
 }
 
+/** @param {import("firebase/firestore").Timestamp | undefined} timestamp */
 function formatDate(timestamp) {
   if (!timestamp?.toDate) return "";
   return timestamp.toDate().toLocaleString("ja-JP");
 }
 
+/** @param {unknown} str */
 function escapeHtml(str) {
   return String(str).replace(
     /[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[/** @type {"&"|"<"|">"|"\""|"'"} */ (c)],
   );
 }
 
+/** @param {unknown} err */
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** @param {unknown} err */
 function showError(err) {
   console.error(err);
-  appEl.innerHTML = `<p class="error">エラーが発生しました: ${escapeHtml(err.message || String(err))}</p>`;
+  appEl.innerHTML = `<p class="error">エラーが発生しました: ${escapeHtml(errorMessage(err))}</p>`;
 }
 
 main().catch(showError);

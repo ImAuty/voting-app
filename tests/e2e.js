@@ -278,6 +278,11 @@ async function main() {
 
   await recovered.click("#close-poll");
   await waitForText(recovered, "締め切り済み");
+  // Confirm this is durable server-side (via the independent watcher client)
+  // before tearing down the pages that made the write - closing a context
+  // can abort a write that's still only applied to that page's own local,
+  // optimistic Firestore cache and hasn't actually reached the emulator yet.
+  await waitForTextGone(watcher, "復旧テスト用の投票");
   await recoveredCtx.close();
   await originalCtx.close();
 

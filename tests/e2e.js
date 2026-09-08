@@ -29,6 +29,14 @@ async function waitForText(page, text, timeout = 10000) {
   );
 }
 
+async function waitForTextGone(page, text, timeout = 10000) {
+  await page.waitForFunction(
+    (t) => !document.body.innerText.includes(t),
+    text,
+    { timeout },
+  );
+}
+
 // A tiny static server for a real, always-loadable test image (the option
 // image feature needs a URL that actually resolves - the sandbox this was
 // developed in has no outbound internet access, so a public image host
@@ -73,10 +81,13 @@ async function main() {
     page.on("pageerror", (e) => console.log(`[${name} pageerror]`, e.message));
   }
 
-  console.log("== Step 1: admin opens app, expects create form ==");
+  console.log("== Step 1: admin opens app, sees the (empty) root list, and follows the create link ==");
   await admin.goto(BASE);
+  await waitForText(admin, "現在進行中の投票はありません");
+  await admin.screenshot({ path: screenshotPath("1-admin-root-empty") });
+  await admin.click("text=+ 新しい投票を作成する");
   await admin.waitForSelector("#question"); // unambiguous marker of the create form
-  await admin.screenshot({ path: screenshotPath("1-admin-create-form") });
+  await admin.screenshot({ path: screenshotPath("1b-admin-create-form") });
 
   console.log("== Step 2: admin fills form (with a description + image URL) and creates a poll ==");
   await admin.fill("#question", "好きな果物は？");
@@ -106,9 +117,35 @@ async function main() {
   if (strangerHasCloseBtn !== 0) throw new Error("a non-creator should not see admin controls via the admin URL");
   await strangerCtx.close();
 
-  console.log("== Step 3: voter opens app at \"/\", gets redirected to /poll/{id}, sees the voting form ==");
+  console.log("== Step 2d: the root list shows every currently-active poll, from any creator, live ==");
+  const watcherCtx = await browser.newContext();
+  const watcher = await watcherCtx.newPage();
+  await watcher.goto(BASE);
+  await waitForText(watcher, "好きな果物は？");
+
+  const admin2Ctx = await browser.newContext();
+  const admin2 = await admin2Ctx.newPage();
+  await admin2.goto(`${BASE}/new`); // a second, unrelated creator - fruit poll stays active the whole time
+  await admin2.fill("#question", "好きな天気は？");
+  const weatherEditors = admin2.locator(".option-editor");
+  await weatherEditors.nth(0).locator('input[data-field="text"]').fill("晴れ");
+  await weatherEditors.nth(1).locator('input[data-field="text"]').fill("雨");
+  await admin2.click("#create-poll");
+  await waitForText(admin2, "投票受付中");
+
+  await waitForText(watcher, "好きな天気は？"); // both polls listed at once, no reload
+  await waitForText(watcher, "好きな果物は？");
+  await watcher.screenshot({ path: screenshotPath("2d-root-multiple-active") });
+
+  await admin2.click("#close-poll");
+  await waitForText(admin2, "締め切り済み");
+  await waitForTextGone(watcher, "好きな天気は？"); // drops out of the list live once closed
+  await admin2Ctx.close();
+
+  console.log("== Step 3: voter opens app at \"/\", clicks the fruit poll, sees the voting form ==");
   await voter.goto(BASE);
   await waitForText(voter, "好きな果物は？");
+  await voter.click("text=好きな果物は？");
   const voterUrl = new URL(voter.url());
   if (voterUrl.pathname !== `/poll/${fruitPollId}`) {
     throw new Error(`expected voter to land on /poll/${fruitPollId}, got ${voterUrl.pathname}`);
@@ -152,14 +189,18 @@ async function main() {
   const voteBtnCount = await voter.locator("#vote-btn").count();
   if (voteBtnCount !== 0) throw new Error(`expected vote button to be gone, found ${voteBtnCount}`);
 
-  console.log("== Step 6b: a bystander opens the app while the poll is still open, but does not vote ==");
+  console.log("== Step 6b: a bystander opens the app, clicks into the still-open poll, but does not vote ==");
   await bystander.goto(BASE);
   await waitForText(bystander, "好きな果物は？");
+  await bystander.click("text=好きな果物は？");
+  await waitForText(bystander, "国産の甘い品種");
 
   console.log("== Step 7: admin closes the poll ==");
   await admin.click("#close-poll");
   await waitForText(admin, "締め切り済み");
   await admin.screenshot({ path: screenshotPath("6-admin-closed") });
+  await waitForTextGone(watcher, "好きな果物は？"); // root list drops it live too
+  await waitForText(watcher, "現在進行中の投票はありません"); // nothing else active yet
 
   console.log("== Step 8: voter (already voted) keeps showing their vote live, no reload ==");
   await waitForText(voter, "投票済み");
@@ -181,6 +222,8 @@ async function main() {
   await drinkEditors.nth(1).locator('input[data-field="text"]').fill("紅茶");
   await admin.click("#create-poll");
   await waitForText(admin, "投票受付中");
+  await waitForText(watcher, "好きな飲み物は？"); // back in the root list, live
+  await watcherCtx.close();
 
   console.log("== Step 11: history lists both polls, and the old one's results are still viewable ==");
   await admin.click("#history-link");

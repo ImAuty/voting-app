@@ -1,19 +1,12 @@
 import { db, waitForUser } from "./firebase.js";
-import {
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  where,
-  orderBy,
-  limit,
-} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { state } from "./state.js";
 import { appEl, toPoll, escapeHtml, showError } from "./shared.js";
 import { renderCreateForm } from "./views/create.js";
 import { renderVoter } from "./views/voter.js";
 import { renderAdmin } from "./views/admin.js";
 import { renderHistory } from "./views/history.js";
+import { renderRootList } from "./views/root.js";
 
 /** @import { Route } from "./shared.js" */
 /** @import { Unsubscribe } from "firebase/firestore" */
@@ -25,11 +18,11 @@ let routeUnsubs = []; // every Firestore listener the current route depends on
 
 // ---- Router ----
 //
-// "/"                -> auto-redirects to whatever's relevant right now
-// "/new"              -> the create-poll form, unconditionally
-// "/history"          -> polls I've created, past and present
-// "/poll/{id}"        -> voting view for that specific poll
-// "/poll/{id}/admin"  -> management view, if I'm that poll's creator
+// "/"                 -> list of every currently-active poll (any creator)
+// "/new"               -> the create-poll form, unconditionally
+// "/history"           -> polls I've created, past and present
+// "/poll/{id}"         -> voting view for that specific poll
+// "/poll/{id}/admin"   -> management view, if I'm that poll's creator
 //
 // Deep links work because every poll-specific view is looked up by the id in
 // the URL rather than "whichever poll happens to be active" - visiting
@@ -92,41 +85,7 @@ async function main() {
   const user = await waitForUser();
   state.uid = user.uid;
   route = parseRoute();
-
-  // These two only matter for "/" - they decide where to send someone who
-  // didn't arrive via a specific poll link. A transient failure here (e.g. a
-  // newly-deployed composite index still building) shouldn't blow away
-  // whatever the current route is actually showing, so they get their own
-  // quiet error handler instead of the page-wiping showError().
-  onSnapshot(
-    query(collection(db, "polls"), where("isActive", "==", true), limit(1)),
-    (snap) => {
-      state.activePoll = snap.empty ? null : toPoll(snap.docs[0].id, snap.docs[0].data());
-      if (route.type === "root") renderRoute();
-    },
-    logBackgroundError,
-  );
-
-  onSnapshot(
-    query(
-      collection(db, "polls"),
-      where("createdBy", "==", state.uid),
-      orderBy("createdAt", "desc"),
-      limit(1),
-    ),
-    (snap) => {
-      state.myPoll = snap.empty ? null : toPoll(snap.docs[0].id, snap.docs[0].data());
-      if (route.type === "root") renderRoute();
-    },
-    logBackgroundError,
-  );
-
   renderRoute();
-}
-
-/** @param {unknown} err */
-function logBackgroundError(err) {
-  console.error("background listener error:", err);
 }
 
 function renderRoute() {
@@ -142,24 +101,7 @@ function renderRoute() {
   } else if (route.type === "notfound") {
     renderNotFound();
   } else {
-    renderRoot();
-  }
-}
-
-function renderRoot() {
-  // activePoll can reflect a poll I just created before the separate
-  // "myPoll" (createdBy) listener catches up - check createdBy first so
-  // that window is never misread as "go show me the voting form".
-  const activeIsMine = state.activePoll && state.activePoll.createdBy === state.uid;
-
-  if (activeIsMine) {
-    navigate(`/poll/${state.activePoll.id}/admin`, { replace: true });
-  } else if (state.activePoll) {
-    navigate(`/poll/${state.activePoll.id}`, { replace: true });
-  } else if (state.myPoll) {
-    navigate(`/poll/${state.myPoll.id}/admin`, { replace: true });
-  } else {
-    renderCreateForm();
+    routeUnsubs.push(renderRootList());
   }
 }
 

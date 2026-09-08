@@ -1,14 +1,13 @@
 import { db } from "../firebase.js";
 import {
   doc,
-  setDoc,
   updateDoc,
   deleteDoc,
-  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { navigate } from "../app.js";
 import { appEl, topNavHtml, escapeHtml, isHttpUrl, errorMessage } from "../shared.js";
 import { emptyOptionInput, buildPollOptions, mountOptionEditor } from "./option-editor.js";
+import { mountRecoveryLinkReveal } from "./recovery-link.js";
 
 /** @import { Poll } from "../shared.js" */
 /** @import { OptionInput } from "./option-editor.js" */
@@ -30,6 +29,7 @@ export function renderDraftEditor(poll) {
     <div class="card">
       <h2>下書きを編集</h2>
       <p class="muted">まだ公開されていません。公開すると質問・選択肢は変更できなくなります。</p>
+      <div id="recovery-link" style="margin-bottom:16px"></div>
       <label class="muted" for="question">質問</label>
       <input id="question" type="text" class="full-width" placeholder="例: 好きな○○は？" value="${escapeHtml(poll.question)}" />
       <div id="options" style="margin-top:12px"></div>
@@ -44,6 +44,11 @@ export function renderDraftEditor(poll) {
       <button type="button" id="publish-poll" class="full-width" style="margin-top:8px">投票を開始する</button>
     </div>
   `;
+
+  mountRecoveryLinkReveal(
+    /** @type {HTMLElement} */ (document.getElementById("recovery-link")),
+    poll.id,
+  );
 
   const optionsEl = /** @type {HTMLElement} */ (document.getElementById("options"));
   const errorEl = /** @type {HTMLElement} */ (document.getElementById("form-error"));
@@ -133,15 +138,11 @@ export function renderDraftEditor(poll) {
         isActive: true,
       });
 
-      // A one-time secret for reclaiming admin access from another browser/
-      // device later - see firestore.rules (private/recovery) and
-      // functions/index.js's recoverAdmin. Only written now, at the moment
-      // of publishing, since a not-yet-public draft isn't at risk the same
-      // way a live poll is.
-      const secret = crypto.randomUUID();
-      await setDoc(doc(db, "polls", poll.id, "private", "recovery"), { secret });
-
-      navigate(`/poll/${poll.id}/admin?recover=${secret}`);
+      // The recovery secret already exists - saveDraft() in views/create.js
+      // wrote it as soon as this poll first existed, not just now at
+      // publish time (private/recovery is create-once, so writing it again
+      // here would be rejected anyway).
+      navigate(`/poll/${poll.id}/admin`);
     } catch (err) {
       console.error(err);
       errorEl.textContent = "公開に失敗しました: " + errorMessage(err);

@@ -81,3 +81,31 @@ export function showError(err) {
   console.error(err);
   appEl.innerHTML = `<p class="error">エラーが発生しました: ${escapeHtml(errorMessage(err))}</p>`;
 }
+
+/**
+ * Renders a read-only, copyable link into `container` with a "コピー"
+ * button, and wires the button up. Shared by every screen that shows a
+ * link to copy (the voter link, the admin recovery link).
+ *
+ * @param {HTMLElement} container
+ * @param {string} url
+ */
+export function renderCopyableLink(container, url) {
+  container.innerHTML = `
+    <input type="text" class="full-width copyable-link-input" readonly value="${escapeHtml(url)}" />
+    <button type="button" class="secondary full-width copyable-link-btn" style="margin-top:8px">リンクをコピー</button>
+    <p class="muted copyable-link-status"></p>
+  `;
+
+  const button = /** @type {HTMLButtonElement} */ (container.querySelector(".copyable-link-btn"));
+  const status = /** @type {HTMLElement} */ (container.querySelector(".copyable-link-status"));
+
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      status.textContent = "コピーしました。";
+    } catch {
+      status.textContent = "コピーに失敗しました。上の欄から手動でコピーしてください。";
+    }
+  });
+}

@@ -149,8 +149,8 @@ async function run() {
     );
   });
 
-  await check("nobody, including the creator, can ever read the recovery secret back", async () => {
-    await assertFails(creatorDb.doc(`polls/${pollId}/private/recovery`).get());
+  await check("the creator can read their own recovery secret back, but nobody else can", async () => {
+    await assertSucceeds(creatorDb.doc(`polls/${pollId}/private/recovery`).get());
     await assertFails(otherDb.doc(`polls/${pollId}/private/recovery`).get());
   });
 

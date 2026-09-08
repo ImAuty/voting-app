@@ -130,6 +130,22 @@ export function renderCreateForm() {
 }
 
 /**
+ * A recovery secret for reclaiming admin access from another browser/
+ * device later, revealed on demand from the admin/draft-editor views (see
+ * firestore.rules, polls/{pollId}/private/recovery, and
+ * functions/index.js's recoverAdmin). Written once, as soon as the poll
+ * first exists - whether as a draft or published directly - as a second,
+ * separate call after the poll doc exists, since the rules for this doc
+ * need to read the poll's own createdBy to confirm it's really the same
+ * creator.
+ *
+ * @param {string} pollId
+ */
+async function createRecoverySecret(pollId) {
+  await setDoc(doc(db, "polls", pollId, "private", "recovery"), { secret: crypto.randomUUID() });
+}
+
+/**
  * @param {string} question
  * @param {OptionInput[]} optionInputs
  */
@@ -145,6 +161,8 @@ async function saveDraft(question, optionInputs) {
     createdAt: serverTimestamp(),
     createdBy: state.uid,
   });
+
+  await createRecoverySecret(pollRef.id);
 
   navigate(`/poll/${pollRef.id}/admin`);
 }
@@ -166,13 +184,7 @@ async function createPoll(question, optionInputs) {
     createdBy: state.uid,
   });
 
-  // A one-time secret for reclaiming admin access from another browser/
-  // device later (see firestore.rules, polls/{pollId}/private/recovery, and
-  // functions/index.js's recoverAdmin). Written as a second, separate call
-  // after the poll doc exists, since the rules for this doc need to read
-  // the poll's own createdBy to confirm it's really the same creator.
-  const secret = crypto.randomUUID();
-  await setDoc(doc(db, "polls", pollRef.id, "private", "recovery"), { secret });
+  await createRecoverySecret(pollRef.id);
 
-  navigate(`/poll/${pollRef.id}/admin?recover=${secret}`);
+  navigate(`/poll/${pollRef.id}/admin`);
 }

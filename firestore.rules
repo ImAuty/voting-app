@@ -143,16 +143,17 @@ service cloud.firestore {
 
       // polls/{pollId}/private/recovery
       //   secret: string
-      // A one-time secret the creator's client generates and stores right
-      // after creating the poll, then shows the creator as part of a
-      // "management recovery link". Nobody can ever read it back through
-      // these rules - it's checked only by the recoverAdmin Cloud Function
-      // (via the Admin SDK, which bypasses these rules) against a value the
-      // client supplies, so knowing it requires having been shown it here.
-      // This is what lets someone reclaim admin access to a poll from a
-      // browser/device other than the one that created it.
+      // A secret the creator's client generates and stores as soon as the
+      // poll first exists (whether as a draft or published directly), and
+      // can reveal on demand as a "management recovery link". Readable only
+      // by the poll's current creator - never by anyone else - and checked
+      // by the recoverAdmin Cloud Function (via the Admin SDK, which
+      // bypasses these rules) against a value a *different* client
+      // supplies. A creator who recovers this way necessarily already knew
+      // the secret (it was in the link they used), so letting them read it
+      // back here doesn't expose anything they didn't already have.
       match /private/recovery {
-        allow read: if false;
+        allow read: if isPollCreator(pollId);
 
         allow create: if isPollCreator(pollId)
           && request.resource.data.keys().hasOnly(['secret'])

@@ -170,7 +170,7 @@ function renderPollRoute(pollId, admin, recoverToken) {
         if (poll.isDraft) {
           renderDraftEditor(poll);
         } else {
-          innerUnsub = renderAdmin(poll, recoverToken);
+          innerUnsub = renderAdmin(poll);
         }
         return;
       }

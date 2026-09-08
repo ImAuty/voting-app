@@ -111,8 +111,17 @@ async function main() {
   const draftUrl = new URL(draftPage.url());
   const draftMatch = draftUrl.pathname.match(/^\/poll\/([^/]+)\/admin$/);
   if (!draftMatch) throw new Error(`expected the draft to land on /poll/{id}/admin, got ${draftUrl.pathname}`);
-  if (draftUrl.search !== "") throw new Error("drafts shouldn't get a ?recover= token - not public yet");
+  if (draftUrl.search !== "") throw new Error("the recovery link is revealed on demand, never auto-added to the URL");
   const draftPollId = draftMatch[1];
+
+  // A draft gets its recovery secret as soon as it's first saved, not just
+  // once published - losing the session while a half-finished draft is
+  // still the only copy shouldn't be unrecoverable either.
+  await draftPage.click("text=管理用の復旧リンクを表示する");
+  const draftRecoveryUrl = await draftPage.locator("#recovery-link .copyable-link-input").inputValue();
+  if (!draftRecoveryUrl.includes("?recover=") || !draftRecoveryUrl.includes(draftPollId)) {
+    throw new Error(`expected a draft to already have a revealable recovery link, got "${draftRecoveryUrl}"`);
+  }
 
   console.log("== Step 1d: the draft's progress actually persisted (survives a reload) ==");
   await draftPage.reload();
@@ -149,6 +158,19 @@ async function main() {
   }
 
   console.log("== Step 1h: the now-published poll shows up in the public root list ==");
+  // Checked first via a plain single-document read (the voter view) rather
+  // than jumping straight to the root list's where()+orderBy() query - the
+  // emulator was observed to occasionally take several extra seconds to
+  // make a very recent write visible to that composite query specifically,
+  // for a document with this poll's write history (draft save, edit,
+  // publish - three rapid writes to one doc), well past the point where a
+  // plain get-this-one-document read already reflects it.
+  const strangerViewCtx = await browser.newContext();
+  const strangerView = await strangerViewCtx.newPage();
+  await strangerView.goto(`${BASE}/poll/${draftPollId}`);
+  await waitForText(strangerView, "下書きテスト");
+  await strangerViewCtx.close();
+
   await draftPage.goto(BASE);
   await waitForText(draftPage, "下書きテスト");
 
@@ -207,6 +229,11 @@ async function main() {
   if (!adminMatch) throw new Error(`expected admin URL to be /poll/{id}/admin, got ${adminUrl.pathname}`);
   const fruitPollId = adminMatch[1];
 
+  const voterLinkValue = await admin.locator("#voter-link .copyable-link-input").inputValue();
+  if (voterLinkValue !== `${BASE}/poll/${fruitPollId}`) {
+    throw new Error(`expected the admin view's voter link box to show the plain voting URL, got "${voterLinkValue}"`);
+  }
+
   console.log("== Step 2c: someone who isn't the creator visiting the admin URL falls back to the voting view ==");
   const strangerCtx = await browser.newContext();
   const stranger = await strangerCtx.newPage();
@@ -251,15 +278,14 @@ async function main() {
   await recoveryPollEditors.nth(1).locator('input[data-field="text"]').fill("選択肢B");
   await original.click("#create-poll");
   await waitForText(original, "投票受付中");
-  await waitForText(original, "管理用の復旧リンク");
 
-  const recoveryUrlBefore = new URL(original.url());
-  if (recoveryUrlBefore.search !== "") {
-    throw new Error(`expected the ?recover= token to be stripped from the URL, got ${recoveryUrlBefore.search}`);
-  }
-  const recoveryUrl = await original.locator("#recovery-url").inputValue();
+  // The recovery link isn't shown automatically - it has to be revealed on
+  // demand, so it isn't sitting on-screen (and in screen recordings,
+  // screenshots, etc.) any more than necessary.
+  await original.click("text=管理用の復旧リンクを表示する");
+  const recoveryUrl = await original.locator("#recovery-link .copyable-link-input").inputValue();
   if (!recoveryUrl.includes("?recover=")) {
-    throw new Error(`expected the recovery banner to show a link with a recover token, got "${recoveryUrl}"`);
+    throw new Error(`expected the revealed recovery link to include a recover token, got "${recoveryUrl}"`);
   }
   await original.screenshot({ path: screenshotPath("2e-recovery-link-shown") });
 

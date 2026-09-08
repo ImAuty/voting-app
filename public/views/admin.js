@@ -5,37 +5,34 @@ import {
   onSnapshot,
   updateDoc,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
-import { appEl, topNavHtml, escapeHtml, errorMessage } from "../shared.js";
+import { appEl, topNavHtml, escapeHtml, errorMessage, renderCopyableLink } from "../shared.js";
+import { mountRecoveryLinkReveal } from "./recovery-link.js";
 
 /** @import { Poll } from "../shared.js" */
 /** @import { Unsubscribe } from "firebase/firestore" */
 
 /**
  * @param {Poll} poll
- * @param {string | null} [recoverToken]
  * @returns {Unsubscribe}
  */
-export function renderAdmin(poll, recoverToken) {
-  const recoveryUrl = recoverToken ? `${location.origin}/poll/${poll.id}/admin?recover=${recoverToken}` : "";
-
+export function renderAdmin(poll) {
   appEl.innerHTML = `
     <h1>投票システム</h1>
     ${topNavHtml()}
-    ${
-      recoverToken
-        ? `<div class="card" style="border:2px solid #2563eb">
-             <h2>管理用の復旧リンク</h2>
-             <p class="muted">
-               他の端末やブラウザ、またはこのブラウザのデータが消えた場合に備えて、このリンクを
-               保存してください。このリンクを知っている人は誰でもこの投票の管理者になれるので、
-               他人に共有しないでください。
-             </p>
-             <input type="text" class="full-width" readonly value="${escapeHtml(recoveryUrl)}" id="recovery-url" />
-             <button type="button" id="copy-recovery-url" class="secondary full-width" style="margin-top:8px">リンクをコピー</button>
-             <p class="muted" id="copy-status"></p>
-           </div>`
-        : ""
-    }
+    <div class="card">
+      <h2>投票用リンク</h2>
+      <p class="muted">このリンクを共有すると、誰でも投票できます。</p>
+      <div id="voter-link"></div>
+    </div>
+    <div class="card">
+      <h2>管理用の復旧リンク</h2>
+      <p class="muted">
+        他の端末やブラウザ、またはこのブラウザのデータが消えた場合に備えて、必要な時にこのリンクを
+        表示して保存してください。このリンクを知っている人は誰でもこの投票の管理者になれるので、
+        他人に共有しないでください。
+      </p>
+      <div id="recovery-link"></div>
+    </div>
     <div class="card">
       <p class="question">${escapeHtml(poll.question)}</p>
       <p class="muted">${poll.isActive ? "投票受付中です。" : "この投票は締め切り済みです。"}</p>
@@ -49,20 +46,17 @@ export function renderAdmin(poll, recoverToken) {
     </div>
   `;
 
+  renderCopyableLink(
+    /** @type {HTMLElement} */ (document.getElementById("voter-link")),
+    `${location.origin}/poll/${poll.id}`,
+  );
+  mountRecoveryLinkReveal(
+    /** @type {HTMLElement} */ (document.getElementById("recovery-link")),
+    poll.id,
+  );
+
   const resultsEl = /** @type {HTMLElement} */ (document.getElementById("results"));
   const errorEl = /** @type {HTMLElement} */ (document.getElementById("admin-error"));
-
-  if (recoverToken) {
-    document.getElementById("copy-recovery-url").addEventListener("click", async () => {
-      const status = /** @type {HTMLElement} */ (document.getElementById("copy-status"));
-      try {
-        await navigator.clipboard.writeText(recoveryUrl);
-        status.textContent = "コピーしました。";
-      } catch {
-        status.textContent = "コピーに失敗しました。上の欄から手動でコピーしてください。";
-      }
-    });
-  }
 
   // Tallies are derived live from the votes subcollection (readable only by
   // the creator) rather than a separately-writable counter - there's then

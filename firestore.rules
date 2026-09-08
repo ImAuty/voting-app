@@ -41,7 +41,12 @@ service cloud.firestore {
              ['question', 'options', 'optionIds', 'isActive', 'createdAt', 'createdBy']);
 
       // Only the creator may modify their poll, and only to flip isActive
-      // (e.g. closing voting). question/options/createdBy/createdAt are immutable.
+      // (e.g. closing voting). question/options/createdAt are immutable.
+      // createdBy is immutable from the client's side too - the only way it
+      // ever changes is the recoverAdmin Cloud Function reassigning it via
+      // the Admin SDK (which isn't subject to these rules at all), after
+      // verifying the one-time secret in private/recovery below. That's the
+      // recovery path for "I lost the browser session that made this poll".
       allow update: if isSignedIn()
         && resource.data.createdBy == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive'])
@@ -78,6 +83,29 @@ service cloud.firestore {
       // alone (rules can't see a sibling document's write within the same
       // request), so a client could otherwise call that increment directly,
       // repeatedly, without ever creating a votes/{uid} doc.
+
+      // polls/{pollId}/private/recovery
+      //   secret: string
+      // A one-time secret the creator's client generates and stores right
+      // after creating the poll, then shows the creator as part of a
+      // "management recovery link". Nobody can ever read it back through
+      // these rules - it's checked only by the recoverAdmin Cloud Function
+      // (via the Admin SDK, which bypasses these rules) against a value the
+      // client supplies, so knowing it requires having been shown it here.
+      // This is what lets someone reclaim admin access to a poll from a
+      // browser/device other than the one that created it.
+      match /private/recovery {
+        allow read: if false;
+
+        allow create: if isPollCreator(pollId)
+          && request.resource.data.keys().hasOnly(['secret'])
+          && request.resource.data.secret is string
+          && request.resource.data.secret.size() >= 20
+          && request.resource.data.secret.size() <= 100;
+
+        allow update: if false;
+        allow delete: if false;
+      }
     }
   }
 }

@@ -9,10 +9,15 @@ import {
   getFirestore,
   connectFirestoreEmulator,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import {
+  getFunctions,
+  connectFunctionsEmulator,
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-functions.js";
 
 /** @import { User } from "firebase/auth" */
 
 const isLocalhost = ["localhost", "127.0.0.1"].includes(location.hostname);
+const FUNCTIONS_REGION = "asia-northeast1"; // matches firestore.location and functions/index.js
 
 // Firebase Hosting serves this reserved URL with the project's real web app
 // config, so we never have to hardcode it here.
@@ -22,10 +27,12 @@ const firebaseConfig = await fetch("/__/firebase/init.json").then((res) => res.j
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const functions = getFunctions(app, FUNCTIONS_REGION);
 
 if (isLocalhost) {
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
 }
 
 // Every visitor (voter or poll creator) is signed in anonymously; their uid

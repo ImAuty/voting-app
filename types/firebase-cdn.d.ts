@@ -14,3 +14,7 @@ declare module "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js" {
 declare module "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js" {
   export * from "firebase/firestore";
 }
+
+declare module "https://www.gstatic.com/firebasejs/12.18.0/firebase-functions.js" {
+  export * from "firebase/functions";
+}

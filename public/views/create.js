@@ -1,7 +1,9 @@
 import { db } from "../firebase.js";
 import {
   collection,
+  doc,
   addDoc,
+  setDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { navigate } from "../app.js";
@@ -150,5 +152,13 @@ async function createPoll(question, optionInputs) {
     createdBy: state.uid,
   });
 
-  navigate(`/poll/${pollRef.id}/admin`);
+  // A one-time secret for reclaiming admin access from another browser/
+  // device later (see firestore.rules, polls/{pollId}/private/recovery, and
+  // functions/index.js's recoverAdmin). Written as a second, separate call
+  // after the poll doc exists, since the rules for this doc need to read
+  // the poll's own createdBy to confirm it's really the same creator.
+  const secret = crypto.randomUUID();
+  await setDoc(doc(db, "polls", pollRef.id, "private", "recovery"), { secret });
+
+  navigate(`/poll/${pollRef.id}/admin?recover=${secret}`);
 }

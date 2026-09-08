@@ -142,6 +142,46 @@ async function main() {
   await waitForTextGone(watcher, "好きな天気は？"); // drops out of the list live once closed
   await admin2Ctx.close();
 
+  console.log("== Step 2e: admin recovery - reclaiming admin access from another browser via the recovery link ==");
+  const originalCtx = await browser.newContext();
+  const original = await originalCtx.newPage();
+  await original.goto(`${BASE}/new`);
+  await original.fill("#question", "復旧テスト用の投票");
+  const recoveryPollEditors = original.locator(".option-editor");
+  await recoveryPollEditors.nth(0).locator('input[data-field="text"]').fill("選択肢A");
+  await recoveryPollEditors.nth(1).locator('input[data-field="text"]').fill("選択肢B");
+  await original.click("#create-poll");
+  await waitForText(original, "投票受付中");
+  await waitForText(original, "管理用の復旧リンク");
+
+  const recoveryUrlBefore = new URL(original.url());
+  if (recoveryUrlBefore.search !== "") {
+    throw new Error(`expected the ?recover= token to be stripped from the URL, got ${recoveryUrlBefore.search}`);
+  }
+  const recoveryUrl = await original.locator("#recovery-url").inputValue();
+  if (!recoveryUrl.includes("?recover=")) {
+    throw new Error(`expected the recovery banner to show a link with a recover token, got "${recoveryUrl}"`);
+  }
+  await original.screenshot({ path: screenshotPath("2e-recovery-link-shown") });
+
+  const recoveredCtx = await browser.newContext();
+  const recovered = await recoveredCtx.newPage();
+  await recovered.goto(recoveryUrl); // a different browser context = a different anonymous uid, simulating a lost session
+  await recovered.waitForSelector("#close-poll"); // now recognized as admin
+  const recoveredUrl = new URL(recovered.url());
+  if (recoveredUrl.search !== "") {
+    throw new Error(`expected the ?recover= token to be stripped after use, got ${recoveredUrl.search}`);
+  }
+  await recovered.screenshot({ path: screenshotPath("2f-recovered-admin-view") });
+
+  console.log("== Step 2g: the original session, still open, is live-demoted to the voter view ==");
+  await original.waitForSelector("#vote-btn");
+
+  await recovered.click("#close-poll");
+  await waitForText(recovered, "締め切り済み");
+  await recoveredCtx.close();
+  await originalCtx.close();
+
   console.log("== Step 3: voter opens app at \"/\", clicks the fruit poll, sees the voting form ==");
   await voter.goto(BASE);
   await waitForText(voter, "好きな果物は？");

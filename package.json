@@ -2,7 +2,7 @@
   "name": "voting-app",
   "private": true,
   "scripts": {
-    "test:e2e": "firebase emulators:exec --only auth,firestore,hosting \"node tests/e2e.js\"",
+    "test:e2e": "firebase emulators:exec --only auth,firestore,functions,hosting \"node tests/e2e.js\"",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/rules.test.js\"",
     "test": "npm run test:rules && npm run test:e2e",
     "typecheck": "tsc"

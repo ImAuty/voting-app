@@ -17,9 +17,15 @@ import { appEl, topNavHtml, escapeHtml, errorMessage } from "../shared.js";
  * @returns {Unsubscribe}
  */
 export function renderVoter(poll) {
+  // Set by app.js right before landing here after a failed /admin?recover=
+  // attempt (wrong or already-used token) - shown once, then cleared.
+  const recoveryError = state.recoveryError;
+  state.recoveryError = null;
+
   appEl.innerHTML = `
     <h1>投票システム</h1>
     ${topNavHtml()}
+    ${recoveryError ? `<p class="error">復旧に失敗しました: ${escapeHtml(recoveryError)}</p>` : ""}
     <div class="card">
       <p class="question">${escapeHtml(poll.question)}</p>
       ${

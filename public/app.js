@@ -1,7 +1,8 @@
-import { db, waitForUser } from "./firebase.js";
+import { db, functions, waitForUser } from "./firebase.js";
 import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-functions.js";
 import { state } from "./state.js";
-import { appEl, toPoll, escapeHtml, showError } from "./shared.js";
+import { appEl, toPoll, escapeHtml, errorMessage, showError } from "./shared.js";
 import { renderCreateForm } from "./views/create.js";
 import { renderVoter } from "./views/voter.js";
 import { renderAdmin } from "./views/admin.js";
@@ -35,9 +36,16 @@ function parseRoute() {
   if (path === "/new") return { type: "create" };
   if (path === "/history") return { type: "history" };
   let m = path.match(/^\/poll\/([^/]+)\/admin$/);
-  if (m) return { type: "poll", pollId: decodeURIComponent(m[1]), admin: true };
+  if (m) {
+    return {
+      type: "poll",
+      pollId: decodeURIComponent(m[1]),
+      admin: true,
+      recoverToken: new URLSearchParams(location.search).get("recover"),
+    };
+  }
   m = path.match(/^\/poll\/([^/]+)$/);
-  if (m) return { type: "poll", pollId: decodeURIComponent(m[1]), admin: false };
+  if (m) return { type: "poll", pollId: decodeURIComponent(m[1]), admin: false, recoverToken: null };
   return { type: "notfound" };
 }
 
@@ -97,7 +105,7 @@ function renderRoute() {
   } else if (route.type === "history") {
     routeUnsubs.push(renderHistory());
   } else if (route.type === "poll") {
-    renderPollRoute(route.pollId, route.admin);
+    renderPollRoute(route.pollId, route.admin, route.recoverToken);
   } else if (route.type === "notfound") {
     renderNotFound();
   } else {
@@ -107,9 +115,18 @@ function renderRoute() {
 
 /**
  * @param {string} pollId
- * @param {boolean} admin
+ * @param {string} secret
  */
-function renderPollRoute(pollId, admin) {
+function recoverAdmin(pollId, secret) {
+  return httpsCallable(functions, "recoverAdmin")({ pollId, secret });
+}
+
+/**
+ * @param {string} pollId
+ * @param {boolean} admin
+ * @param {string | null} recoverToken
+ */
+function renderPollRoute(pollId, admin, recoverToken) {
   appEl.innerHTML = `<p class="muted">読み込み中…</p>`;
 
   /** @type {Unsubscribe | null} */
@@ -121,24 +138,57 @@ function renderPollRoute(pollId, admin) {
     }
   }
 
+  // Whether to act on recoverToken at all is decided ONLY from the very
+  // first snapshot, i.e. from the state the poll was in when this page
+  // loaded. Without this, a stale recoverToken sitting in this closure
+  // would make a tab that started out as the creator try to reclaim
+  // adminship right back the moment someone else legitimately recovers it
+  // (its later snapshots would see "I'm not the creator anymore, but I do
+  // remember a valid recovery token" and fire the call below all over
+  // again) - an automatic tug-of-war neither side asked for.
+  let firstSnapshot = true;
+
   const outerUnsub = onSnapshot(
     doc(db, "polls", pollId),
     (snap) => {
       clearInner();
+      const isFirstSnapshot = firstSnapshot;
+      firstSnapshot = false;
+
       if (!snap.exists()) {
         renderNotFound();
         return;
       }
       const poll = toPoll(snap.id, snap.data());
+
       if (admin && poll.createdBy === state.uid) {
-        innerUnsub = renderAdmin(poll);
-      } else {
-        // Either a voter link, or an admin link opened by someone who isn't
-        // the creator (URL-based admin access isn't supported - the
-        // security rules still gate results/votes by createdBy, so this
-        // falls back to the voting view instead of a dead end).
-        innerUnsub = renderVoter(poll);
+        // Strip a spent or self-owned ?recover= token from the visible URL
+        // either way - there's nothing left to do with it once we already
+        // know we're the creator.
+        if (recoverToken) history.replaceState({}, "", `/poll/${pollId}/admin`);
+        innerUnsub = renderAdmin(poll, recoverToken);
+        return;
       }
+
+      if (admin && isFirstSnapshot && recoverToken) {
+        appEl.innerHTML = `<p class="muted">管理者として復旧しています…</p>`;
+        recoverAdmin(pollId, recoverToken).catch(
+          /** @param {unknown} err */
+          (err) => {
+            state.recoveryError = errorMessage(err);
+            navigate(`/poll/${pollId}/admin`, { replace: true });
+          },
+        );
+        return;
+      }
+
+      // Either a voter link, an admin link opened by someone who isn't the
+      // creator and has no recovery token, or a spent/invalid one (the
+      // error from that attempt, if any, is picked up by renderVoter via
+      // state.recoveryError). The security rules still gate results/votes
+      // by createdBy, so this falls back to the voting view instead of a
+      // dead end.
+      innerUnsub = renderVoter(poll);
     },
     showError,
   );

@@ -143,6 +143,47 @@ async function run() {
     );
   });
 
+  await check("the creator can write a recovery secret of plausible length", async () => {
+    await assertSucceeds(
+      creatorDb.doc(`polls/${pollId}/private/recovery`).set({ secret: "a".repeat(32) }),
+    );
+  });
+
+  await check("nobody, including the creator, can ever read the recovery secret back", async () => {
+    await assertFails(creatorDb.doc(`polls/${pollId}/private/recovery`).get());
+    await assertFails(otherDb.doc(`polls/${pollId}/private/recovery`).get());
+  });
+
+  await check("the recovery secret is immutable once written", async () => {
+    await assertFails(
+      creatorDb.doc(`polls/${pollId}/private/recovery`).update({ secret: "b".repeat(32) }),
+    );
+    await assertFails(creatorDb.doc(`polls/${pollId}/private/recovery`).delete());
+  });
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc("polls/poll2").set({
+      question: "second poll",
+      options: [{ id: "0", text: "A" }, { id: "1", text: "B" }],
+      optionIds: ["0", "1"],
+      isActive: true,
+      createdAt: new Date(),
+      createdBy: CREATOR_UID,
+    });
+  });
+
+  await check("only the poll's creator can write its recovery secret", async () => {
+    await assertFails(
+      otherDb.doc("polls/poll2/private/recovery").set({ secret: "c".repeat(32) }),
+    );
+  });
+
+  await check("a too-short recovery secret is rejected", async () => {
+    await assertFails(
+      creatorDb.doc("polls/poll2/private/recovery").set({ secret: "tooshort" }),
+    );
+  });
+
   await testEnv.cleanup();
 
   console.log(`\n${passed} checks passed`);

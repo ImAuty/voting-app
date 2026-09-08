@@ -29,7 +29,7 @@
  * @typedef {{ type: "root" }} RootRoute
  * @typedef {{ type: "create" }} CreateRoute
  * @typedef {{ type: "history" }} HistoryRoute
- * @typedef {{ type: "poll", pollId: string, admin: boolean }} PollRoute
+ * @typedef {{ type: "poll", pollId: string, admin: boolean, recoverToken: string | null }} PollRoute
  * @typedef {{ type: "notfound" }} NotFoundRoute
  * @typedef {RootRoute | CreateRoute | HistoryRoute | PollRoute | NotFoundRoute} Route
  */

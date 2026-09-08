@@ -1,4 +1,4 @@
-import { db } from "../firebase.js";
+import { db, storage } from "../firebase.js";
 import {
   collection,
   doc,
@@ -6,11 +6,21 @@ import {
   setDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL,
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
 import { navigate } from "../app.js";
 import { state } from "../state.js";
 import { appEl, topNavHtml, escapeHtml, isHttpUrl, errorMessage } from "../shared.js";
 
 /** @import { PollOption } from "../shared.js" */
+
+// Must match storage.rules' size limit for option-images/ - checked here
+// too so an oversized file is rejected immediately instead of after a
+// failed round-trip to Storage.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export function renderCreateForm() {
   // Staged by "コピーして新規作成" in the history list - a one-shot prefill,
@@ -61,6 +71,8 @@ export function renderCreateForm() {
             <input type="text" data-field="text" data-index="${i}" value="${escapeHtml(value.text)}" placeholder="選択肢のテキスト" />
             <input type="text" data-field="description" data-index="${i}" value="${escapeHtml(value.description)}" placeholder="説明（任意）" />
             <input type="url" data-field="imageUrl" data-index="${i}" value="${escapeHtml(value.imageUrl)}" placeholder="画像URL（任意・https://...）" />
+            <input type="file" accept="image/*" data-upload-index="${i}" style="margin-top:4px" />
+            <span class="muted" data-upload-status="${i}"></span>
             ${value.imageUrl ? `<img class="option-image-preview" src="${escapeHtml(value.imageUrl)}" alt="" onerror="this.style.display='none'" />` : ""}
           </div>
         `,
@@ -82,6 +94,41 @@ export function renderCreateForm() {
         drawOptions();
       });
     });
+    optionsEl.querySelectorAll("input[data-upload-index]").forEach((input) => {
+      input.addEventListener("change", (e) => {
+        const target = /** @type {HTMLInputElement} */ (e.target);
+        const i = Number(target.dataset.uploadIndex);
+        const file = target.files && target.files[0];
+        if (file) uploadOptionImage(i, file);
+      });
+    });
+  }
+
+  /**
+   * @param {number} i
+   * @param {File} file
+   */
+  async function uploadOptionImage(i, file) {
+    const statusEl = optionsEl.querySelector(`[data-upload-status="${i}"]`);
+    if (!file.type.startsWith("image/")) {
+      if (statusEl) statusEl.textContent = "画像ファイルを選択してください。";
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      if (statusEl) statusEl.textContent = "5MB以下の画像を選択してください。";
+      return;
+    }
+
+    if (statusEl) statusEl.textContent = "アップロード中…";
+    try {
+      const imageRef = ref(storage, `option-images/${state.uid}/${crypto.randomUUID()}`);
+      await uploadBytes(imageRef, file, { contentType: file.type });
+      optionValues[i].imageUrl = await getDownloadURL(imageRef);
+      drawOptions();
+    } catch (err) {
+      console.error(err);
+      if (statusEl) statusEl.textContent = "アップロードに失敗しました: " + errorMessage(err);
+    }
   }
 
   drawOptions();

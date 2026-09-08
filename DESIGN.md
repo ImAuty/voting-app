@@ -18,16 +18,26 @@ polls/{pollId}
   - question: string        例: "好きな○○は？"
   - options: array          [{ id, text, description?, imageUrl? }, ...]
                              ※description/imageUrlは任意。voteCountは含まない（下記results参照）
+                             imageUrlは外部URLの貼り付け、またはCloud Storageへのアップロード
+                             （下記「画像アップロード」参照）のどちらでも同じ文字列フィールドに入る
   - optionIds: array        [id, ...]             ※options[].idの一覧。セキュリティルールでの検証用
   - isActive: boolean
   - createdAt: timestamp
-  - createdBy: string       作成者(=管理者)のuid
+  - createdBy: string       作成者(=管理者)のuid。通常は不変だが、recoverAdmin Cloud Function
+                             （Admin SDK経由、ルールの対象外）だけは例外的に書き換える
+                             （下記「管理者復旧」参照）
 
 ### votes サブコレクション（二重投票防止・集計の元データ）
 polls/{pollId}/votes/{voterUid}   ← ドキュメントIDを投票者UIDにする
   - optionId: string
   - votedAt: timestamp
   - 読み取りは作成者、または本人（自分が投票済みか確認するため）のみ。作成後は更新・削除不可
+
+### private/recovery サブコレクション（管理者復旧用の秘密情報）
+polls/{pollId}/private/recovery
+  - secret: string          投票作成直後にクライアントが生成し書き込む乱数（crypto.randomUUID()）
+  - 誰にも読み取りを許可しない（allow read: if false）。recoverAdmin Cloud FunctionがAdmin SDK
+    経由で内部的に照合するだけで、Firestoreのルール越しに読めるクライアントは存在しない
 
 ## ポイント
 - 匿名認証(Anonymous Authentication)のUIDをvotesのドキュメントIDに使い、二重投票を防止
@@ -50,7 +60,34 @@ polls/{pollId}/votes/{voterUid}   ← ドキュメントIDを投票者UIDにす�
 - `/poll/{pollId}/admin` … 特定の投票の管理画面。ただし実際に結果を見たり締め切ったりできるのは
                           Firestoreのセキュリティルール上、作成者(createdBy)のuidと一致する場合のみ。
                           作成者以外がこのURLを開いた場合は投票画面にフォールバックする
-  - 現状、管理者かどうかの判定は匿名認証のuid（＝ブラウザ/端末に紐づくセッション）に依存するため、
-    「管理用URLを別の端末で開けば管理者になれる」わけではない。真に別端末でも通用する共有可能な
-    管理者リンクが必要になった場合は、Cloud Functionsによるカスタムトークン発行などが別途必要
+  - 管理者かどうかの判定は匿名認証のuid（＝ブラウザ/端末に紐づくセッション）に依存するため、単に
+    「管理用URLを別の端末で開く」だけでは管理者になれない。別端末・ブラウザデータ消失時の対応は
+    下記「管理者復旧」を参照
 - `/history`           … 自分が作成した投票の一覧（過去のものも含む）
+
+## 管理者復旧（Cloud Functions）
+- 匿名認証のuidはブラウザに紐づくため、ブラウザデータの消去や別端末への切り替えで永久に管理者権限
+  を失う問題があった（`createdBy`は本来不変で、締切・削除ができるのも作成者のuidと一致する場合のみ）
+- 対策として、投票作成直後にクライアントが乱数の復旧シークレットを生成し、誰も読み取れない
+  `polls/{pollId}/private/recovery`に保存。作成者にはこのシークレットを埋め込んだ「管理用復旧リンク」
+  （`/poll/{pollId}/admin?recover={secret}`）を管理画面のバナーで一度提示し、保存を促す
+- 別のブラウザ/端末でこのリンクを開くと、`recoverAdmin` Cloud Function（`functions/index.js`）が
+  呼ばれる。シークレットを定数時間比較で照合し、一致すれば`createdBy`を呼び出し元の現在のuidに
+  書き換える（Admin SDK経由、Firestoreルールの対象外）。既存のリアルタイムリスナーがこの変更を
+  検知し、自動的に管理画面へ切り替わる
+- この復旧リンクは失効・使い捨てではない。知っている人は何度でも管理者になれる「合鍵」として
+  設計している（例えば元のセッションが後から復旧リンクを再度開けば、管理者権限を取り戻せる）
+- Cloud Functionsの利用にはFirebaseの課金プランをBlaze（従量課金）にする必要がある
+
+## 画像アップロード（Cloud Storage）
+- 選択肢の画像は、外部URLを貼り付ける方法に加えて、ファイルを直接アップロードする方法も選べる
+  （`public/views/create.js`）。アップロードした画像のダウンロードURLは、外部URLを貼った場合と
+  全く同じ`imageUrl`フィールドに入るため、投票データのスキーマやルール、表示側のコードは
+  アップロード由来かどうかを区別しない
+- 保存先は`option-images/{uid}/{ランダムなファイル名}`。投票作成前（pollIdが確定する前）に
+  アップロードするため、投票IDではなくアップロードした本人のuidでパスを分けている
+- `storage.rules`：読み取りはサインイン済みなら誰でも可（`polls`ドキュメントと同じ扱い）。
+  書き込み・削除は自分のuidのプレフィックス配下のみ、5MB以下・image/*のみ許可
+- アップロード済みで投票作成をキャンセルした画像など、使われなくなった画像を自動削除する仕組みは
+  現状ない（将来的に問題になれば、定期実行のCloud Functionsでの掃除を検討）
+- Cloud Storageの利用にも同様にBlazeプランが必要（2026年2月3日以降、Sparkプランでは一切利用不可）

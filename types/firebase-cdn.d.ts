@@ -18,3 +18,7 @@ declare module "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js
 declare module "https://www.gstatic.com/firebasejs/12.18.0/firebase-functions.js" {
   export * from "firebase/functions";
 }
+
+declare module "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js" {
+  export * from "firebase/storage";
+}

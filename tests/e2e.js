@@ -98,6 +98,12 @@ async function main() {
   await optionEditors.nth(1).locator('input[data-field="imageUrl"]').fill(mikanImageUrl);
   await admin.click("#add-option");
   await admin.locator(".option-editor").nth(2).locator('input[data-field="text"]').fill("ぶどう");
+  await admin
+    .locator(".option-editor")
+    .nth(2)
+    .locator('input[type="file"]')
+    .setInputFiles(path.join(FIXTURES_DIR, "pixel.png"));
+  await admin.locator(".option-editor").nth(2).locator(".option-image-preview").waitFor(); // upload finished
   await admin.click("#create-poll");
   await waitForText(admin, "投票受付中");
   await admin.screenshot({ path: screenshotPath("2-admin-active-results") });
@@ -191,10 +197,14 @@ async function main() {
     throw new Error(`expected voter to land on /poll/${fruitPollId}, got ${voterUrl.pathname}`);
   }
   await waitForText(voter, "国産の甘い品種");
-  const mikanThumbSrc = await voter.locator(".option-thumb").getAttribute("src");
+  const mikanThumbSrc = await voter
+    .locator(".option-row", { hasText: "みかん" })
+    .locator(".option-thumb")
+    .getAttribute("src");
   if (mikanThumbSrc !== mikanImageUrl) {
     throw new Error(`expected option image src to round-trip, got ${mikanThumbSrc}`);
   }
+
   await voter.screenshot({ path: screenshotPath("3-voter-form") });
 
   console.log("== Step 3a: a made-up poll id shows the not-found page ==");
@@ -205,7 +215,7 @@ async function main() {
   await notFoundCtx.close();
 
   console.log("== Step 3b: clicking the option image opens a lightbox, and clicking again closes it ==");
-  await voter.click(".option-thumb");
+  await voter.locator(".option-row", { hasText: "みかん" }).locator(".option-thumb").click();
   await voter.waitForSelector(".lightbox-overlay img");
   const lightboxSrc = await voter.locator(".lightbox-overlay img").getAttribute("src");
   if (lightboxSrc !== mikanImageUrl) {
@@ -214,6 +224,17 @@ async function main() {
   await voter.screenshot({ path: screenshotPath("3b-voter-lightbox") });
   await voter.click(".lightbox-overlay");
   await voter.waitForSelector(".lightbox-overlay", { state: "detached" });
+
+  console.log("== Step 3c: the option image uploaded to Cloud Storage also round-trips ==");
+  const grapeThumbSrc = await voter
+    .locator(".option-row", { hasText: "ぶどう" })
+    .locator(".option-thumb")
+    .getAttribute("src");
+  if (!grapeThumbSrc) throw new Error("expected an uploaded image thumbnail for ぶどう");
+  const grapeImageResponse = await voter.request.get(grapeThumbSrc);
+  if (!grapeImageResponse.ok()) {
+    throw new Error(`expected the uploaded image URL to be fetchable, got status ${grapeImageResponse.status()}`);
+  }
 
   console.log("== Step 4: voter votes for みかん ==");
   await voter.click('input[name="option"][value="1"]');

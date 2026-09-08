@@ -18,6 +18,9 @@
       "runtime": "nodejs20"
     }
   ],
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "public": "public",
     "ignore": [
@@ -37,6 +40,7 @@
     "firestore": { "port": 8080 },
     "functions": { "port": 5001 },
     "hosting": { "port": 5000 },
+    "storage": { "port": 9199 },
     "ui": { "enabled": true }
   }
 }

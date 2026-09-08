@@ -13,6 +13,10 @@ import {
   getFunctions,
   connectFunctionsEmulator,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-functions.js";
+import {
+  getStorage,
+  connectStorageEmulator,
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
 
 /** @import { User } from "firebase/auth" */
 
@@ -28,11 +32,13 @@ export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app, FUNCTIONS_REGION);
+export const storage = getStorage(app);
 
 if (isLocalhost) {
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+  connectStorageEmulator(storage, "127.0.0.1", 9199);
 }
 
 // Every visitor (voter or poll creator) is signed in anonymously; their uid

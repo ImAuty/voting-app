@@ -1,27 +1,23 @@
 import { db } from "../firebase.js";
 import {
-  collection,
   doc,
-  addDoc,
   setDoc,
+  updateDoc,
+  deleteDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { navigate } from "../app.js";
-import { state } from "../state.js";
 import { appEl, topNavHtml, escapeHtml, isHttpUrl, errorMessage } from "../shared.js";
 import { emptyOptionInput, buildPollOptions, mountOptionEditor } from "./option-editor.js";
 
+/** @import { Poll } from "../shared.js" */
 /** @import { OptionInput } from "./option-editor.js" */
 
-export function renderCreateForm() {
-  // Staged by "コピーして新規作成" in the history list - a one-shot prefill,
-  // consumed here so a later blank visit to /new doesn't reuse it.
-  const prefill = state.copySource;
-  state.copySource = null;
-
+/** @param {Poll} poll */
+export function renderDraftEditor(poll) {
   /** @type {OptionInput[]} */
-  const optionValues = prefill
-    ? prefill.options.map((o) => ({
+  const optionValues = poll.options.length
+    ? poll.options.map((o) => ({
         text: o.text || "",
         description: o.description || "",
         imageUrl: o.imageUrl || "",
@@ -32,18 +28,20 @@ export function renderCreateForm() {
     <h1>投票システム</h1>
     ${topNavHtml()}
     <div class="card">
-      <h2>新しい投票を作成</h2>
+      <h2>下書きを編集</h2>
+      <p class="muted">まだ公開されていません。公開すると質問・選択肢は変更できなくなります。</p>
       <label class="muted" for="question">質問</label>
-      <input id="question" type="text" class="full-width" placeholder="例: 好きな○○は？" value="${prefill ? escapeHtml(prefill.question) : ""}" />
+      <input id="question" type="text" class="full-width" placeholder="例: 好きな○○は？" value="${escapeHtml(poll.question)}" />
       <div id="options" style="margin-top:12px"></div>
       <div class="option-add-row">
         <button type="button" id="add-option" class="secondary">+ 選択肢を追加</button>
       </div>
       <p class="error" id="form-error"></p>
       <div class="option-add-row">
+        <button type="button" id="delete-draft" class="secondary">下書きを削除</button>
         <button type="button" id="save-draft" class="secondary full-width">一時保存する</button>
-        <button id="create-poll" class="full-width">投票を開始する</button>
       </div>
+      <button type="button" id="publish-poll" class="full-width" style="margin-top:8px">投票を開始する</button>
     </div>
   `;
 
@@ -91,15 +89,21 @@ export function renderCreateForm() {
 
     button.disabled = true;
     try {
-      await saveDraft(question, options);
+      const builtOptions = buildPollOptions(options);
+      await updateDoc(doc(db, "polls", poll.id), {
+        question,
+        options: builtOptions,
+        optionIds: builtOptions.map((o) => o.id),
+      });
     } catch (err) {
       console.error(err);
       errorEl.textContent = "一時保存に失敗しました: " + errorMessage(err);
+    } finally {
       button.disabled = false;
     }
   });
 
-  document.getElementById("create-poll").addEventListener("click", async (e) => {
+  document.getElementById("publish-poll").addEventListener("click", async (e) => {
     const button = /** @type {HTMLButtonElement} */ (e.target);
     errorEl.textContent = "";
     const { question, options } = readForm();
@@ -120,59 +124,39 @@ export function renderCreateForm() {
 
     button.disabled = true;
     try {
-      await createPoll(question, options);
+      const builtOptions = buildPollOptions(options);
+      await updateDoc(doc(db, "polls", poll.id), {
+        question,
+        options: builtOptions,
+        optionIds: builtOptions.map((o) => o.id),
+        isDraft: false,
+        isActive: true,
+      });
+
+      // A one-time secret for reclaiming admin access from another browser/
+      // device later - see firestore.rules (private/recovery) and
+      // functions/index.js's recoverAdmin. Only written now, at the moment
+      // of publishing, since a not-yet-public draft isn't at risk the same
+      // way a live poll is.
+      const secret = crypto.randomUUID();
+      await setDoc(doc(db, "polls", poll.id, "private", "recovery"), { secret });
+
+      navigate(`/poll/${poll.id}/admin?recover=${secret}`);
     } catch (err) {
       console.error(err);
-      errorEl.textContent = "作成に失敗しました: " + errorMessage(err);
+      errorEl.textContent = "公開に失敗しました: " + errorMessage(err);
       button.disabled = false;
     }
   });
-}
 
-/**
- * @param {string} question
- * @param {OptionInput[]} optionInputs
- */
-async function saveDraft(question, optionInputs) {
-  const options = buildPollOptions(optionInputs);
-
-  const pollRef = await addDoc(collection(db, "polls"), {
-    question,
-    options,
-    optionIds: options.map((o) => o.id),
-    isActive: false,
-    isDraft: true,
-    createdAt: serverTimestamp(),
-    createdBy: state.uid,
+  document.getElementById("delete-draft").addEventListener("click", async () => {
+    if (!confirm("この下書きを削除しますか？")) return;
+    try {
+      await deleteDoc(doc(db, "polls", poll.id));
+      navigate("/history");
+    } catch (err) {
+      console.error(err);
+      errorEl.textContent = "削除に失敗しました: " + errorMessage(err);
+    }
   });
-
-  navigate(`/poll/${pollRef.id}/admin`);
-}
-
-/**
- * @param {string} question
- * @param {OptionInput[]} optionInputs
- */
-async function createPoll(question, optionInputs) {
-  const options = buildPollOptions(optionInputs);
-
-  const pollRef = await addDoc(collection(db, "polls"), {
-    question,
-    options,
-    optionIds: options.map((o) => o.id),
-    isActive: true,
-    isDraft: false,
-    createdAt: serverTimestamp(),
-    createdBy: state.uid,
-  });
-
-  // A one-time secret for reclaiming admin access from another browser/
-  // device later (see firestore.rules, polls/{pollId}/private/recovery, and
-  // functions/index.js's recoverAdmin). Written as a second, separate call
-  // after the poll doc exists, since the rules for this doc need to read
-  // the poll's own createdBy to confirm it's really the same creator.
-  const secret = crypto.randomUUID();
-  await setDoc(doc(db, "polls", pollRef.id, "private", "recovery"), { secret });
-
-  navigate(`/poll/${pollRef.id}/admin?recover=${secret}`);
 }

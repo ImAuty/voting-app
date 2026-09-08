@@ -184,6 +184,87 @@ async function run() {
     );
   });
 
+  // ---- Drafts (one-time save / re-edit before publishing) ----
+
+  await check("the creator can start a draft with an incomplete shape (no question, no options)", async () => {
+    await assertSucceeds(
+      creatorDb.doc("polls/draft1").set({
+        question: "",
+        options: [],
+        optionIds: [],
+        isActive: false,
+        isDraft: true,
+        createdAt: serverTimestamp(),
+        createdBy: CREATOR_UID,
+      }),
+    );
+  });
+
+  await check("a draft with isDraft/isActive both true is rejected (drafts are never active)", async () => {
+    await assertFails(
+      creatorDb.doc("polls/bad-draft").set({
+        question: "",
+        options: [],
+        optionIds: [],
+        isActive: true,
+        isDraft: true,
+        createdAt: serverTimestamp(),
+        createdBy: CREATOR_UID,
+      }),
+    );
+  });
+
+  await check("a non-draft created with isActive false is rejected (must publish active)", async () => {
+    await assertFails(
+      creatorDb.doc("polls/bad-publish").set({
+        question: "q",
+        options: [{ id: "0", text: "A" }, { id: "1", text: "B" }],
+        optionIds: ["0", "1"],
+        isActive: false,
+        isDraft: false,
+        createdAt: serverTimestamp(),
+        createdBy: CREATOR_UID,
+      }),
+    );
+  });
+
+  await check("a draft is readable only by its own creator", async () => {
+    await assertSucceeds(creatorDb.doc("polls/draft1").get());
+    await assertFails(otherDb.doc("polls/draft1").get());
+  });
+
+  await check("the creator can keep editing a draft's question/options", async () => {
+    await assertSucceeds(
+      creatorDb.doc("polls/draft1").update({
+        question: "draft question",
+        options: [{ id: "0", text: "A" }],
+        optionIds: ["0"],
+      }),
+    );
+  });
+
+  await check("publishing a draft that's still incomplete (only 1 option) is rejected", async () => {
+    await assertFails(creatorDb.doc("polls/draft1").update({ isDraft: false, isActive: true }));
+  });
+
+  await check("a non-creator cannot edit or publish someone else's draft", async () => {
+    await assertFails(otherDb.doc("polls/draft1").update({ question: "hijacked" }));
+    await assertFails(otherDb.doc("polls/draft1").update({ isDraft: false, isActive: true }));
+  });
+
+  await check("publishing a now-complete draft succeeds", async () => {
+    await creatorDb.doc("polls/draft1").update({
+      options: [{ id: "0", text: "A" }, { id: "1", text: "B" }],
+      optionIds: ["0", "1"],
+    });
+    await assertSucceeds(creatorDb.doc("polls/draft1").update({ isDraft: false, isActive: true }));
+  });
+
+  await check("once published, a formerly-draft poll is frozen just like any other", async () => {
+    await assertFails(creatorDb.doc("polls/draft1").update({ question: "changed after publish" }));
+    await assertSucceeds(creatorDb.doc("polls/draft1").update({ isActive: false }));
+  });
+
   await testEnv.cleanup();
 
   console.log(`\n${passed} checks passed`);

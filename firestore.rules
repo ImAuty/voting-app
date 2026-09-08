@@ -15,42 +15,99 @@ service cloud.firestore {
       return isSignedIn() && pollData(pollId).createdBy == request.auth.uid;
     }
 
+    // A poll only has to be "complete" (non-empty question, 2-10 options)
+    // once it's about to become visible/votable. While isDraft is true the
+    // creator can save partial progress freely - see isDraftPollShape.
+    function isCompletePollShape(data) {
+      return data.question is string
+        && data.question.size() > 0
+        && data.question.size() <= 200
+        && data.options is list
+        && data.options.size() >= 2
+        && data.options.size() <= 10
+        && data.optionIds is list
+        && data.optionIds.size() == data.options.size();
+    }
+
+    function isDraftPollShape(data) {
+      return data.question is string
+        && data.question.size() <= 200
+        && data.options is list
+        && data.options.size() <= 10
+        && data.optionIds is list
+        && data.optionIds.size() == data.options.size();
+    }
+
     // polls/{pollId}
     //   question: string
     //   options: [{ id: string, text: string }, ...]   (no voteCount - see results/ below)
     //   optionIds: [string, ...]                       (mirrors options[].id, used for validation)
     //   isActive: boolean
+    //   isDraft: boolean       true while still being edited pre-publish - see below
     //   createdAt: timestamp
     //   createdBy: string (uid of the creator/admin for this poll)
     match /polls/{pollId} {
-      allow read: if isSignedIn();
+      // A draft is visible only to its creator - unlike a published poll,
+      // which has to be readable by every voter, a draft might be
+      // incomplete or not meant to be seen by anyone yet.
+      // get('isDraft', false) treats documents written before this field
+      // existed as published, so old data doesn't suddenly become unreadable.
+      allow read: if isSignedIn()
+        && (resource.data.get('isDraft', false) == false || resource.data.createdBy == request.auth.uid);
 
+      // Two ways to create a polls doc: publish immediately (isDraft:
+      // false, isActive: true, full validation - the original behavior),
+      // or start a draft (isDraft: true, isActive: false, relaxed
+      // validation since a draft can be incomplete while someone's still
+      // filling it in).
       allow create: if isSignedIn()
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time
-        && request.resource.data.question is string
-        && request.resource.data.question.size() > 0
-        && request.resource.data.question.size() <= 200
-        && request.resource.data.isActive is bool
-        && request.resource.data.options is list
-        && request.resource.data.options.size() >= 2
-        && request.resource.data.options.size() <= 10
-        && request.resource.data.optionIds is list
-        && request.resource.data.optionIds.size() == request.resource.data.options.size()
+        && request.resource.data.isDraft is bool
         && request.resource.data.keys().hasOnly(
-             ['question', 'options', 'optionIds', 'isActive', 'createdAt', 'createdBy']);
+             ['question', 'options', 'optionIds', 'isActive', 'isDraft', 'createdAt', 'createdBy'])
+        && (
+          (request.resource.data.isDraft == true
+            && request.resource.data.isActive == false
+            && isDraftPollShape(request.resource.data))
+          || (request.resource.data.isDraft == false
+            && request.resource.data.isActive == true
+            && isCompletePollShape(request.resource.data))
+        );
 
-      // Only the creator may modify their poll, and only to flip isActive
-      // (e.g. closing voting). question/options/createdAt are immutable.
-      // createdBy is immutable from the client's side too - the only way it
+      // Only the creator may modify their poll. createdBy/createdAt are
+      // always immutable from the client's side (the only way createdBy
       // ever changes is the recoverAdmin Cloud Function reassigning it via
-      // the Admin SDK (which isn't subject to these rules at all), after
-      // verifying the one-time secret in private/recovery below. That's the
-      // recovery path for "I lost the browser session that made this poll".
-      allow update: if isSignedIn()
-        && resource.data.createdBy == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive'])
-        && request.resource.data.isActive is bool;
+      // the Admin SDK, which isn't subject to these rules at all - see
+      // private/recovery below). What else is allowed depends on whether
+      // this poll is currently a draft:
+      allow update: if isSignedIn() && resource.data.createdBy == request.auth.uid && (
+        // Already published: the only change ever allowed is flipping
+        // isActive (e.g. closing voting) - question/options are frozen
+        // for good the moment a poll stops being a draft.
+        (resource.data.get('isDraft', false) == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive'])
+          && request.resource.data.isActive is bool)
+
+        // Still a draft: keep editing question/options freely.
+        || (resource.data.get('isDraft', false) == true
+          && request.resource.data.isDraft == true
+          && request.resource.data.isActive == false
+          && request.resource.data.keys().hasOnly(
+               ['question', 'options', 'optionIds', 'isActive', 'isDraft', 'createdAt', 'createdBy'])
+          && isDraftPollShape(request.resource.data))
+
+        // Publish a draft: isDraft flips true -> false and isActive turns
+        // on in the same write, and from this point on the same complete-
+        // shape validation as a direct create applies - this is the moment
+        // voters can see it, so it's the last chance to enforce that.
+        || (resource.data.get('isDraft', false) == true
+          && request.resource.data.isDraft == false
+          && request.resource.data.isActive == true
+          && request.resource.data.keys().hasOnly(
+               ['question', 'options', 'optionIds', 'isActive', 'isDraft', 'createdAt', 'createdBy'])
+          && isCompletePollShape(request.resource.data))
+      );
 
       allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
 

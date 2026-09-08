@@ -6,6 +6,7 @@ import { appEl, toPoll, escapeHtml, errorMessage, showError } from "./shared.js"
 import { renderCreateForm } from "./views/create.js";
 import { renderVoter } from "./views/voter.js";
 import { renderAdmin } from "./views/admin.js";
+import { renderDraftEditor } from "./views/draft.js";
 import { renderHistory } from "./views/history.js";
 import { renderRootList } from "./views/root.js";
 
@@ -166,7 +167,11 @@ function renderPollRoute(pollId, admin, recoverToken) {
         // either way - there's nothing left to do with it once we already
         // know we're the creator.
         if (recoverToken) history.replaceState({}, "", `/poll/${pollId}/admin`);
-        innerUnsub = renderAdmin(poll, recoverToken);
+        if (poll.isDraft) {
+          renderDraftEditor(poll);
+        } else {
+          innerUnsub = renderAdmin(poll, recoverToken);
+        }
         return;
       }
 
@@ -190,7 +195,18 @@ function renderPollRoute(pollId, admin, recoverToken) {
       // dead end.
       innerUnsub = renderVoter(poll);
     },
-    showError,
+    (err) => {
+      // A draft is only readable by its own creator (see firestore.rules) -
+      // a stranger hitting one's URL gets a permission error rather than
+      // poll data. Treated the same as a made-up id instead of the generic
+      // error page, so a denied read doesn't read as "something's broken"
+      // and doesn't confirm "a poll exists at this id" either.
+      if (err.code === "permission-denied") {
+        renderNotFound();
+      } else {
+        showError(err);
+      }
+    },
   );
 
   routeUnsubs.push(outerUnsub, clearInner);

@@ -46,8 +46,8 @@ export function renderHistory() {
           (poll, i) => `
             <div class="history-row">
               <a href="/poll/${poll.id}/admin" data-link class="history-item">
-                <span class="history-item-question">${escapeHtml(poll.question)}</span><br>
-                <span class="muted">${poll.isActive ? "投票受付中" : "締め切り済み"} ・ ${formatDate(poll.createdAt)}</span>
+                <span class="history-item-question">${poll.question ? escapeHtml(poll.question) : "(無題の下書き)"}</span><br>
+                <span class="muted">${poll.isDraft ? "下書き" : poll.isActive ? "投票受付中" : "締め切り済み"} ・ ${formatDate(poll.createdAt)}</span>
               </a>
               <button type="button" class="secondary copy-btn" data-copy-index="${i}">コピーして新規作成</button>
             </div>

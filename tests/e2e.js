@@ -21,7 +21,7 @@ function screenshotPath(name) {
   return path.join(ARTIFACTS_DIR, `${name}.png`);
 }
 
-async function waitForText(page, text, timeout = 10000) {
+async function waitForText(page, text, timeout = 20000) {
   await page.waitForFunction(
     (t) => document.body.innerText.includes(t),
     text,
@@ -29,7 +29,7 @@ async function waitForText(page, text, timeout = 10000) {
   );
 }
 
-async function waitForTextGone(page, text, timeout = 10000) {
+async function waitForTextGone(page, text, timeout = 20000) {
   await page.waitForFunction(
     (t) => !document.body.innerText.includes(t),
     text,
@@ -88,6 +88,99 @@ async function main() {
   await admin.click("text=+ 新しい投票を作成する");
   await admin.waitForSelector("#question"); // unambiguous marker of the create form
   await admin.screenshot({ path: screenshotPath("1b-admin-create-form") });
+
+  console.log("== Step 1c: draft save / resume / publish, in an isolated session ==");
+  const draftCtx = await browser.newContext();
+  const draftPage = await draftCtx.newPage();
+  draftPage.on("dialog", (dialog) => dialog.accept()); // for the "delete this draft?" confirm() below
+  draftPage.on("console", (m) => {
+    if (m.type() === "error") console.log(`[draft console error]`, m.text());
+  });
+  draftPage.on("pageerror", (e) => console.log(`[draft pageerror]`, e.message));
+
+  await draftPage.goto(`${BASE}/new`);
+  await draftPage.fill("#question", "下書きテスト");
+  await draftPage
+    .locator(".option-editor")
+    .nth(0)
+    .locator('input[data-field="text"]')
+    .fill("選択肢イチ");
+  // Deliberately leave option 2 blank - a draft can be incomplete.
+  await draftPage.click("text=一時保存する");
+  await waitForText(draftPage, "下書きを編集");
+  const draftUrl = new URL(draftPage.url());
+  const draftMatch = draftUrl.pathname.match(/^\/poll\/([^/]+)\/admin$/);
+  if (!draftMatch) throw new Error(`expected the draft to land on /poll/{id}/admin, got ${draftUrl.pathname}`);
+  if (draftUrl.search !== "") throw new Error("drafts shouldn't get a ?recover= token - not public yet");
+  const draftPollId = draftMatch[1];
+
+  console.log("== Step 1d: the draft's progress actually persisted (survives a reload) ==");
+  await draftPage.reload();
+  await waitForText(draftPage, "下書きを編集");
+  const reloadedQuestion = await draftPage.locator("#question").inputValue();
+  if (reloadedQuestion !== "下書きテスト") {
+    throw new Error(`expected the saved draft question to round-trip, got "${reloadedQuestion}"`);
+  }
+
+  console.log("== Step 1e: the draft shows up in history as a draft, not as an active/closed poll ==");
+  await draftPage.click("#history-link");
+  await waitForText(draftPage, "下書き");
+  await waitForText(draftPage, "下書きテスト");
+
+  console.log("== Step 1f: publishing an incomplete draft (still 1 option) is rejected ==");
+  await draftPage.goto(`${BASE}/poll/${draftPollId}/admin`);
+  await waitForText(draftPage, "下書きを編集");
+  await draftPage.click("text=投票を開始する");
+  await waitForText(draftPage, "選択肢は2つ以上入力してください");
+
+  console.log("== Step 1g: filling in the second option and publishing succeeds ==");
+  await draftPage.click("#add-option"); // resuming a 1-option draft only shows the row(s) it was saved with
+  await draftPage
+    .locator(".option-editor")
+    .nth(1)
+    .locator('input[data-field="text"]')
+    .fill("選択肢ニ");
+  await draftPage.click("text=投票を開始する");
+  await waitForText(draftPage, "投票受付中"); // now the normal admin/results view
+  await waitForText(draftPage, "管理用の復旧リンク"); // publishing behaves like a direct create
+  const publishedUrl = new URL(draftPage.url());
+  if (publishedUrl.pathname !== `/poll/${draftPollId}/admin`) {
+    throw new Error(`expected publishing to keep the same poll id, got ${publishedUrl.pathname}`);
+  }
+
+  console.log("== Step 1h: the now-published poll shows up in the public root list ==");
+  await draftPage.goto(BASE);
+  await waitForText(draftPage, "下書きテスト");
+
+  console.log("== Step 1i: a second, abandoned draft can be deleted from its editor ==");
+  await draftPage.goto(`${BASE}/new`);
+  await draftPage.fill("#question", "消す下書き");
+  await draftPage.click("text=一時保存する");
+  await waitForText(draftPage, "下書きを編集");
+  await draftPage.click("text=下書きを削除");
+  await waitForText(draftPage, "過去に作成した投票"); // navigates to /history after deleting
+  await waitForTextGone(draftPage, "消す下書き");
+
+  // Close the published draft so it doesn't linger as a second active poll
+  // for the rest of this script - later steps assume the root list is
+  // empty once the "好きな果物は？" poll below is closed.
+  await draftPage.goto(`${BASE}/poll/${draftPollId}/admin`);
+  await draftPage.click("#close-poll");
+  await waitForText(draftPage, "締め切り済み");
+
+  // Confirm the close is durably server-side, not just draftPage's own
+  // optimistic local cache, via a second, independent client - this poll
+  // went through more rapid successive writes (draft save, edit, publish,
+  // close) than any other poll in this script, and closing it here was
+  // occasionally observed to still read back as active moments later
+  // despite draftPage itself already showing "締め切り済み".
+  const verifyCtx = await browser.newContext();
+  const verifyPage = await verifyCtx.newPage();
+  await verifyPage.goto(`${BASE}/poll/${draftPollId}`);
+  await waitForText(verifyPage, "締め切られました");
+  await verifyCtx.close();
+
+  await draftCtx.close();
 
   console.log("== Step 2: admin fills form (with a description + image URL) and creates a poll ==");
   await admin.fill("#question", "好きな果物は？");

@@ -17,6 +17,7 @@
  * @property {PollOption[]} options
  * @property {string[]} optionIds
  * @property {boolean} isActive
+ * @property {boolean} [isDraft] - true while still being edited pre-publish; absent/false means published
  * @property {import("firebase/firestore").Timestamp} createdAt
  * @property {string} createdBy
  */

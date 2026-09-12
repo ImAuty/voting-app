@@ -74,9 +74,6 @@ tests/.artifacts/
 # IDE workspace state (machine-specific)
 .idea/
 
-# Claude Code local (personal) settings
-.claude/settings.local.json
-
-# Vendored skill content - reproducible from skills-lock.json, not project code
-.claude/skills/
-.agents/skills/
+# Claude Code workspace state (machine-specific)
+.claude/
+.agents/

@@ -77,16 +77,32 @@ async function run() {
   const voterDb = testEnv.authenticatedContext(VOTER_UID).firestore();
   const otherDb = testEnv.authenticatedContext(OTHER_UID).firestore();
 
-  await check("a voter can cast one vote for a valid option", async () => {
-    await assertSucceeds(
-      voterDb.doc(`polls/${pollId}/votes/${VOTER_UID}`).set({
-        optionId: "0",
-        votedAt: serverTimestamp(),
-      }),
-    );
+  await check(
+    "REGRESSION: a voter cannot create a vote directly anymore - only the " +
+      "castVote Cloud Function (Admin SDK, which bypasses these rules) may, " +
+      "because it also has to check the caller's IP address, which rules " +
+      "can't see - see firestore.rules and functions/index.js",
+    async () => {
+      await assertFails(
+        voterDb.doc(`polls/${pollId}/votes/${VOTER_UID}`).set({
+          optionId: "0",
+          votedAt: serverTimestamp(),
+        }),
+      );
+    },
+  );
+
+  // Seed a vote the way castVote actually would (Admin SDK, bypassing
+  // rules) so the read/immutability checks below still have a real vote
+  // doc to exercise.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc(`polls/${pollId}/votes/${VOTER_UID}`).set({
+      optionId: "0",
+      votedAt: new Date(),
+    });
   });
 
-  await check("that same voter cannot vote again (update denied)", async () => {
+  await check("that same voter cannot overwrite their own already-cast vote", async () => {
     await assertFails(
       voterDb.doc(`polls/${pollId}/votes/${VOTER_UID}`).set({
         optionId: "1",
@@ -120,27 +136,30 @@ async function run() {
     },
   );
 
-  await check("a voter cannot vote for a nonexistent option id", async () => {
-    await assertFails(
-      otherDb.doc(`polls/${pollId}/votes/${OTHER_UID}`).set({
-        optionId: "does-not-exist",
-        votedAt: serverTimestamp(),
-      }),
-    );
-  });
+  // Validating optionId against the poll and rejecting votes on a closed
+  // poll both used to be tested here directly against the rules, but that
+  // validation now lives in the castVote Cloud Function instead (direct
+  // client creates are denied unconditionally regardless of either) -
+  // exercised for real by tests/e2e.js's actual vote flow, not here.
+
+  await check(
+    "the ipVotes subcollection has no client-facing rule at all - nobody, " +
+      "not even the poll's creator, can read or write it directly",
+    async () => {
+      await assertFails(creatorDb.doc(`polls/${pollId}/ipVotes/somehash`).get());
+      await assertFails(otherDb.doc(`polls/${pollId}/ipVotes/somehash`).get());
+      await assertFails(
+        creatorDb.doc(`polls/${pollId}/ipVotes/somehash`).set({
+          voterUid: OTHER_UID,
+          votedAt: serverTimestamp(),
+        }),
+      );
+    },
+  );
 
   await check("nobody but the creator can flip isActive", async () => {
     await assertFails(otherDb.doc(`polls/${pollId}`).update({ isActive: false }));
     await assertSucceeds(creatorDb.doc(`polls/${pollId}`).update({ isActive: false }));
-  });
-
-  await check("a vote cannot be cast once the poll is closed", async () => {
-    await assertFails(
-      otherDb.doc(`polls/${pollId}/votes/${OTHER_UID}`).set({
-        optionId: "0",
-        votedAt: serverTimestamp(),
-      }),
-    );
   });
 
   await check("the creator can write a recovery secret of plausible length", async () => {

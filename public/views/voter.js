@@ -1,11 +1,10 @@
-import { db } from "../firebase.js";
+import { db, functions } from "../firebase.js";
 import {
   doc,
   getDoc,
-  setDoc,
   onSnapshot,
-  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-functions.js";
 import { state } from "../state.js";
 import { appEl, topNavHtml, escapeHtml, errorMessage } from "../shared.js";
 
@@ -114,13 +113,14 @@ function optionRowHtml(opt) {
 async function castVote(pollId, optionId) {
   const voteRef = doc(db, "polls", pollId, "votes", /** @type {string} */ (state.uid));
 
-  // A friendly pre-check (reading my own vote doc is always allowed); the
-  // security rules are the real enforcement - votes/{uid} can only ever be
-  // created once and is immutable after, so a double-vote is rejected there
-  // even if this check races.
+  // A friendly pre-check (reading my own vote doc is always allowed) so an
+  // obvious repeat click doesn't even round-trip to the function. The real
+  // enforcement is the castVote Cloud Function itself, which also rejects a
+  // second vote from the same IP address - something a direct Firestore
+  // write (and these rules) can't see at all. See functions/index.js.
   const existing = await getDoc(voteRef);
   if (existing.exists()) {
     throw new Error("すでに投票済みです。");
   }
-  await setDoc(voteRef, { optionId, votedAt: serverTimestamp() });
+  await httpsCallable(functions, "castVote")({ pollId, optionId });
 }

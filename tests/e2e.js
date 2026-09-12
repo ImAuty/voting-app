@@ -376,11 +376,18 @@ async function main() {
   const voteBtnCount = await voter.locator("#vote-btn").count();
   if (voteBtnCount !== 0) throw new Error(`expected vote button to be gone, found ${voteBtnCount}`);
 
-  console.log("== Step 6b: a bystander opens the app, clicks into the still-open poll, but does not vote ==");
+  console.log("== Step 6b: a bystander opens the app, clicks into the still-open poll, and tries to vote - but is blocked (this whole script runs through 127.0.0.1, the same IP the voter above already voted from, which is exactly the private/incognito-window scenario the castVote Cloud Function's IP check is meant to catch) ==");
   await bystander.goto(BASE);
   await waitForText(bystander, "好きな果物は？");
   await bystander.click("text=好きな果物は？");
   await waitForText(bystander, "国産の甘い品種");
+  await bystander.click('input[name="option"][value="0"]');
+  await bystander.click("#vote-btn");
+  await waitForText(bystander, "同じネットワークから");
+  await bystander.screenshot({ path: screenshotPath("4b-bystander-blocked-same-ip") });
+
+  console.log("== Step 6c: the blocked attempt did not affect the tally ==");
+  await waitForText(admin, "合計 1 票");
 
   console.log("== Step 7: admin closes the poll ==");
   await admin.click("#close-poll");

@@ -121,17 +121,31 @@ service cloud.firestore {
         allow read: if isPollCreator(pollId)
           || (isSignedIn() && request.auth.uid == voterUid);
 
-        allow create: if isSignedIn()
-          && request.auth.uid == voterUid
-          && pollData(pollId).isActive == true
-          && request.resource.data.optionId in pollData(pollId).optionIds
-          && request.resource.data.votedAt == request.time
-          && request.resource.data.keys().hasOnly(['optionId', 'votedAt']);
+        // Casting a vote goes through the castVote Cloud Function (Admin
+        // SDK, functions/index.js) instead of a direct client write, which
+        // is why this is unconditionally denied here. That function checks
+        // everything this rule used to (signed in, matching uid, poll
+        // active, valid optionId) plus one thing rules never could: it also
+        // rejects a second vote from the same IP address, even from a
+        // brand-new uid (e.g. a private/incognito window) - Firestore
+        // security rules simply have no access to the caller's IP.
+        allow create: if false;
 
         // Votes are immutable once cast.
         allow update: if false;
         allow delete: if false;
       }
+
+      // polls/{pollId}/ipVotes/{ipHash}
+      //   voterUid: string
+      //   votedAt: timestamp
+      // Written only by the castVote Cloud Function (Admin SDK, which
+      // bypasses these rules) as it creates the matching votes/{uid} doc -
+      // see there and functions/index.js for why. Deliberately has no match
+      // block of its own beyond this comment, so it's fully inaccessible to
+      // every client, including the poll's creator: nothing here needs to
+      // ever be read back through the app, and every read/write attempt
+      // falls through to Firestore's default deny.
 
       // Vote tallies are derived by the creator directly from the votes
       // subcollection above (which they can already read in full) rather

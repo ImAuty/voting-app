@@ -9,7 +9,7 @@ import {
 import { navigate } from "../app.js";
 import { state } from "../state.js";
 import { appEl, topNavHtml, escapeHtml, isHttpUrl, errorMessage } from "../shared.js";
-import { emptyOptionInput, buildPollOptions, mountOptionEditor } from "./option-editor.js";
+import { emptyOptionInput, buildPollOptions, mountOptionEditor, MAX_OPTIONS } from "./option-editor.js";
 
 /** @import { OptionInput } from "./option-editor.js" */
 
@@ -49,9 +49,18 @@ export function renderCreateForm() {
 
   const optionsEl = /** @type {HTMLElement} */ (document.getElementById("options"));
   const errorEl = /** @type {HTMLElement} */ (document.getElementById("form-error"));
-  const editor = mountOptionEditor(optionsEl, optionValues);
+  const addOptionBtn = /** @type {HTMLButtonElement} */ (document.getElementById("add-option"));
 
-  document.getElementById("add-option").addEventListener("click", () => {
+  function syncAddOptionButton() {
+    addOptionBtn.disabled = optionValues.length >= MAX_OPTIONS;
+    addOptionBtn.title = addOptionBtn.disabled ? `選択肢は${MAX_OPTIONS}個までです。` : "";
+  }
+
+  const editor = mountOptionEditor(optionsEl, optionValues, { onChange: syncAddOptionButton });
+  syncAddOptionButton();
+
+  addOptionBtn.addEventListener("click", () => {
+    if (optionValues.length >= MAX_OPTIONS) return;
     optionValues.push(emptyOptionInput());
     editor.redraw();
   });

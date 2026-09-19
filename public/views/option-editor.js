@@ -18,6 +18,10 @@ import { escapeHtml, errorMessage } from "../shared.js";
 // failed round-trip to Storage.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
+// Must match firestore.rules' options.size() cap - checked here too so
+// hitting the limit shows a friendly message instead of a failed write.
+export const MAX_OPTIONS = 50;
+
 /** @returns {OptionInput} */
 export function emptyOptionInput() {
   return { text: "", description: "", imageUrl: "" };
@@ -50,9 +54,10 @@ export function buildPollOptions(optionInputs) {
  *
  * @param {HTMLElement} container
  * @param {OptionInput[]} optionValues
+ * @param {{ onChange?: () => void }} [options]
  * @returns {{ redraw: () => void }}
  */
-export function mountOptionEditor(container, optionValues) {
+export function mountOptionEditor(container, optionValues, { onChange } = {}) {
   function redraw() {
     container.innerHTML = optionValues
       .map(
@@ -96,6 +101,8 @@ export function mountOptionEditor(container, optionValues) {
         if (file) uploadOptionImage(i, file);
       });
     });
+
+    if (onChange) onChange();
   }
 
   /**

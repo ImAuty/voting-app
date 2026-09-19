@@ -15,7 +15,7 @@ service cloud.firestore {
       return isSignedIn() && pollData(pollId).createdBy == request.auth.uid;
     }
 
-    // A poll only has to be "complete" (non-empty question, 2-10 options)
+    // A poll only has to be "complete" (non-empty question, 2-50 options)
     // once it's about to become visible/votable. While isDraft is true the
     // creator can save partial progress freely - see isDraftPollShape.
     function isCompletePollShape(data) {
@@ -24,7 +24,7 @@ service cloud.firestore {
         && data.question.size() <= 200
         && data.options is list
         && data.options.size() >= 2
-        && data.options.size() <= 10
+        && data.options.size() <= 50
         && data.optionIds is list
         && data.optionIds.size() == data.options.size();
     }
@@ -33,7 +33,7 @@ service cloud.firestore {
       return data.question is string
         && data.question.size() <= 200
         && data.options is list
-        && data.options.size() <= 10
+        && data.options.size() <= 50
         && data.optionIds is list
         && data.optionIds.size() == data.options.size();
     }
